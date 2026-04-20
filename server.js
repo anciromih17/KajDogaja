@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const QRCode = require('qrcode');
@@ -8,6 +9,8 @@ const QRCode = require('qrcode');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'kajdogaja-development-secret';
+const ACCESS_TOKEN_EXPIRES_IN = 60 * 60;
+const REFRESH_TOKEN_EXPIRES_IN = 60 * 60 * 24 * 7;
 const DATA_DIR = path.join(__dirname, 'data');
 const DB_PATH = path.join(DATA_DIR, 'db.json');
 
@@ -113,6 +116,16 @@ function seedDb() {
                 ustvarjeno: created
             }
         ],
+        oauthClients: [
+            {
+                id: 'kajdogaja-test-client',
+                secret: 'kajdogaja-test-secret',
+                name: 'KajDogaja testni Node.js odjemalec',
+                redirect_uris: ['http://localhost/callback'],
+                scopes: ['read', 'write', 'events', 'registrations', 'notifications']
+            }
+        ],
+        oauthRefreshTokens: [],
         revokedTokens: []
     };
 }
@@ -132,6 +145,38 @@ function loadDb() {
 }
 
 let db = loadDb();
+normalizeDb();
+
+function normalizeDb() {
+    let changed = false;
+
+    if (!Array.isArray(db.oauthClients)) {
+        db.oauthClients = [
+            {
+                id: 'kajdogaja-test-client',
+                secret: 'kajdogaja-test-secret',
+                name: 'KajDogaja testni Node.js odjemalec',
+                redirect_uris: ['http://localhost/callback'],
+                scopes: ['read', 'write', 'events', 'registrations', 'notifications']
+            }
+        ];
+        changed = true;
+    }
+
+    if (!Array.isArray(db.oauthRefreshTokens)) {
+        db.oauthRefreshTokens = [];
+        changed = true;
+    }
+
+    if (!Array.isArray(db.revokedTokens)) {
+        db.revokedTokens = [];
+        changed = true;
+    }
+
+    if (changed) {
+        saveDb();
+    }
+}
 
 async function ensureQrCodes() {
     let changed = false;
@@ -191,20 +236,107 @@ function enrichEvent(event) {
     };
 }
 
+function tokenHash(token) {
+    return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function findOAuthClient(clientId, clientSecret) {
+    return db.oauthClients.find((client) => {
+        return client.id === clientId && client.secret === clientSecret;
+    });
+}
+
+function normalizeScope(scope, client) {
+    const requested = String(scope || client.scopes.join(' '))
+        .split(/\s+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+    const allowed = requested.filter((item) => client.scopes.includes(item));
+    return allowed.length ? allowed.join(' ') : client.scopes.join(' ');
+}
+
+function scopesForUser(user) {
+    if (user.vloga === 'organizator') {
+        return ['read', 'write', 'events', 'registrations', 'notifications'];
+    }
+
+    return ['read', 'registrations', 'notifications'];
+}
+
+function normalizeUserScope(scope, client, user) {
+    const clientScope = normalizeScope(scope, client).split(/\s+/);
+    const userScopes = scopesForUser(user);
+    const allowed = clientScope.filter((item) => userScopes.includes(item));
+    return allowed.length ? allowed.join(' ') : userScopes.join(' ');
+}
+
+function createAccessToken(user, client, scope) {
+    return jwt.sign(
+        {
+            token_use: 'access_token',
+            sub: user.id,
+            id: user.id,
+            vloga: user.vloga,
+            uporabnisko_ime: user.uporabnisko_ime,
+            client_id: client.id,
+            scope
+        },
+        JWT_SECRET,
+        { expiresIn: ACCESS_TOKEN_EXPIRES_IN }
+    );
+}
+
+function createRefreshToken(user, client, scope) {
+    const refreshToken = crypto.randomBytes(48).toString('base64url');
+    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_IN * 1000).toISOString();
+
+    db.oauthRefreshTokens.push({
+        id: id('rt'),
+        token_hash: tokenHash(refreshToken),
+        user_id: user.id,
+        client_id: client.id,
+        scope,
+        expires_at: expiresAt,
+        revoked: false,
+        ustvarjen: now()
+    });
+
+    return refreshToken;
+}
+
+function issueOAuthTokens(user, client, scope) {
+    const accessToken = createAccessToken(user, client, scope);
+    const refreshToken = createRefreshToken(user, client, scope);
+    saveDb();
+
+    return {
+        access_token: accessToken,
+        token_type: 'Bearer',
+        expires_in: ACCESS_TOKEN_EXPIRES_IN,
+        refresh_token: refreshToken,
+        scope
+    };
+}
+
 function authenticate(req, res, next) {
     const authHeader = req.headers.authorization || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
     if (!token) {
-        return sendError(res, 401, 'Manjka JWT zeton.');
+        return sendError(res, 401, 'Manjka OAuth Bearer access_token.');
     }
 
     if (db.revokedTokens.includes(token)) {
-        return sendError(res, 401, 'Zeton ni vec veljaven.');
+        return sendError(res, 401, 'Access token ni vec veljaven.');
     }
 
     try {
         const payload = jwt.verify(token, JWT_SECRET);
+        if (payload.token_use !== 'access_token') {
+            return sendError(res, 401, 'Zeton ni OAuth access_token.');
+        }
+
         const user = db.users.find((candidate) => candidate.id === payload.id);
         if (!user) {
             return sendError(res, 401, 'Uporabnik ne obstaja.');
@@ -212,9 +344,13 @@ function authenticate(req, res, next) {
 
         req.user = user;
         req.token = token;
+        req.oauth = {
+            client_id: payload.client_id,
+            scope: payload.scope
+        };
         return next();
     } catch (error) {
-        return sendError(res, 401, 'Neveljaven JWT zeton.');
+        return sendError(res, 401, 'Neveljaven OAuth access_token.');
     }
 }
 
@@ -223,6 +359,19 @@ function requireRole(role) {
         if (req.user.vloga !== role) {
             return sendError(res, 403, `Dostop dovoljen samo za vlogo ${role}.`);
         }
+        return next();
+    };
+}
+
+function requireScope(...requiredScopes) {
+    return (req, res, next) => {
+        const tokenScopes = String(req.oauth?.scope || '').split(/\s+/).filter(Boolean);
+        const hasAllScopes = requiredScopes.every((scope) => tokenScopes.includes(scope));
+
+        if (!hasAllScopes) {
+            return sendError(res, 403, `Manjka OAuth scope: ${requiredScopes.join(' ')}.`);
+        }
+
         return next();
     };
 }
@@ -333,7 +482,6 @@ app.get('/', (req, res) => {
 <body>
     <main>
         <h1>KajDogaja</h1>
-        <p>Express REST API je na voljo pod <code>/api</code>. Spodaj so se vedno dostopni dokumenti idejne zasnove.</p>
         <div class="grid">
             <a href="/api">/api</a>
             <a href="/funkcionalnosti-odjemalca/">Funkcionalnosti odjemalca</a>
@@ -379,6 +527,9 @@ app.get('/api', (req, res) => {
         ime: 'KajDogaja REST API',
         verzija: '1.0.0',
         endpointi: [
+            'POST /api/oauth/token',
+            'POST /api/oauth/revoke',
+            'POST /api/oauth/introspect',
             'POST /api/auth/register',
             'POST /api/auth/login',
             'POST /api/auth/logout',
@@ -437,14 +588,14 @@ app.post('/api/auth/login', async (req, res) => {
         return sendError(res, 401, 'Napacni prijavni podatki.');
     }
 
-    const token = jwt.sign(
-        { id: user.id, vloga: user.vloga, uporabnisko_ime: user.uporabnisko_ime },
-        JWT_SECRET,
-        { expiresIn: '2h' }
-    );
+    const client = db.oauthClients[0];
+    const scope = client.scopes.join(' ');
+    const token = createAccessToken(user, client, scope);
 
     return res.json({
         token,
+        token_type: 'Bearer',
+        expires_in: ACCESS_TOKEN_EXPIRES_IN,
         uporabnik: {
             id: user.id,
             vloga: user.vloga,
@@ -465,6 +616,115 @@ app.get('/api/categories', (req, res) => {
 
 app.get('/api/cities', (req, res) => {
     res.json(db.cities);
+});
+
+app.post('/api/oauth/token', async (req, res) => {
+    const {
+        grant_type,
+        client_id,
+        client_secret,
+        username,
+        email,
+        password,
+        geslo,
+        refresh_token,
+        scope
+    } = req.body;
+
+    const client = findOAuthClient(client_id, client_secret);
+    if (!client) {
+        return sendError(res, 401, 'OAuth odjemalec ni veljaven.');
+    }
+
+    if (grant_type === 'password') {
+        const loginEmail = email || username;
+        const loginPassword = geslo || password;
+        const user = db.users.find((candidate) => {
+            return candidate.email.toLowerCase() === String(loginEmail || '').toLowerCase();
+        });
+
+        if (!user || !(await bcrypt.compare(String(loginPassword || ''), user.geslo_hash))) {
+            return sendError(res, 401, 'Napacni prijavni podatki.');
+        }
+
+        return res.json(issueOAuthTokens(user, client, normalizeUserScope(scope, client, user)));
+    }
+
+    if (grant_type === 'refresh_token') {
+        const storedRefreshToken = db.oauthRefreshTokens.find((candidate) => {
+            return candidate.token_hash === tokenHash(String(refresh_token || ''))
+                && candidate.client_id === client.id;
+        });
+
+        if (!storedRefreshToken || storedRefreshToken.revoked) {
+            return sendError(res, 401, 'Refresh token ni veljaven.');
+        }
+
+        if (new Date(storedRefreshToken.expires_at).getTime() < Date.now()) {
+            storedRefreshToken.revoked = true;
+            saveDb();
+            return sendError(res, 401, 'Refresh token je potekel.');
+        }
+
+        const user = db.users.find((candidate) => candidate.id === storedRefreshToken.user_id);
+        if (!user) {
+            return sendError(res, 401, 'Uporabnik ne obstaja.');
+        }
+
+        storedRefreshToken.revoked = true;
+        return res.json(issueOAuthTokens(user, client, normalizeUserScope(storedRefreshToken.scope, client, user)));
+    }
+
+    return sendError(res, 400, 'Nepodprt OAuth grant_type.');
+});
+
+app.post('/api/oauth/revoke', (req, res) => {
+    const { client_id, client_secret, token, token_type_hint } = req.body;
+    const client = findOAuthClient(client_id, client_secret);
+    if (!client) {
+        return sendError(res, 401, 'OAuth odjemalec ni veljaven.');
+    }
+
+    if (token_type_hint === 'refresh_token') {
+        const storedRefreshToken = db.oauthRefreshTokens.find((candidate) => {
+            return candidate.token_hash === tokenHash(String(token || '')) && candidate.client_id === client.id;
+        });
+        if (storedRefreshToken) {
+            storedRefreshToken.revoked = true;
+        }
+    } else if (token && !db.revokedTokens.includes(token)) {
+        db.revokedTokens.push(token);
+    }
+
+    saveDb();
+    return res.status(200).json({ sporocilo: 'Token je preklican.' });
+});
+
+app.post('/api/oauth/introspect', (req, res) => {
+    const { client_id, client_secret, token } = req.body;
+    const client = findOAuthClient(client_id, client_secret);
+    if (!client) {
+        return sendError(res, 401, 'OAuth odjemalec ni veljaven.');
+    }
+
+    try {
+        if (!token || db.revokedTokens.includes(token)) {
+            return res.json({ active: false });
+        }
+
+        const payload = jwt.verify(token, JWT_SECRET);
+        return res.json({
+            active: true,
+            sub: payload.sub,
+            client_id: payload.client_id,
+            scope: payload.scope,
+            token_type: 'Bearer',
+            exp: payload.exp,
+            iat: payload.iat
+        });
+    } catch (error) {
+        return res.json({ active: false });
+    }
 });
 
 app.get('/api/events', (req, res) => {
@@ -521,7 +781,7 @@ app.get('/api/events/:id/qr', (req, res) => {
     return res.json({ qr_koda_url: event.qr_koda_url });
 });
 
-app.get('/api/events/:id/registrations', authenticate, requireRole('organizator'), requireEventOwner, (req, res) => {
+app.get('/api/events/:id/registrations', authenticate, requireScope('read', 'registrations'), requireRole('organizator'), requireEventOwner, (req, res) => {
     const registrations = eventRegistrations(req.event.id).map((registration) => ({
         id: registration.id,
         uporabnik: publicUser(db.users.find((user) => user.id === registration.uporabnik_id)),
@@ -531,7 +791,7 @@ app.get('/api/events/:id/registrations', authenticate, requireRole('organizator'
     return res.json(registrations);
 });
 
-app.post('/api/events/:id/registrations', authenticate, requireRole('uporabnik'), (req, res) => {
+app.post('/api/events/:id/registrations', authenticate, requireScope('registrations'), requireRole('uporabnik'), (req, res) => {
     const event = findEvent(req.params.id);
     if (!event) {
         return sendError(res, 404, 'Dogodek ne obstaja.');
@@ -567,7 +827,7 @@ app.post('/api/events/:id/registrations', authenticate, requireRole('uporabnik')
     });
 });
 
-app.delete('/api/events/:id/registrations', authenticate, requireRole('uporabnik'), (req, res) => {
+app.delete('/api/events/:id/registrations', authenticate, requireScope('registrations'), requireRole('uporabnik'), (req, res) => {
     const index = db.registrations.findIndex((registration) => {
         return registration.dogodek_id === req.params.id
             && registration.uporabnik_id === req.user.id
@@ -583,7 +843,7 @@ app.delete('/api/events/:id/registrations', authenticate, requireRole('uporabnik
     return res.status(204).send();
 });
 
-app.get('/api/events/:id/stats', authenticate, requireRole('organizator'), requireEventOwner, (req, res) => {
+app.get('/api/events/:id/stats', authenticate, requireScope('read', 'events'), requireRole('organizator'), requireEventOwner, (req, res) => {
     const total = eventRegistrations(req.event.id).length;
     const capacity = req.event.kapaciteta;
     return res.json({
@@ -603,7 +863,7 @@ app.get('/api/events/:id', (req, res) => {
     return res.json(enrichEvent(event));
 });
 
-app.post('/api/events', authenticate, requireRole('organizator'), async (req, res) => {
+app.post('/api/events', authenticate, requireScope('write', 'events'), requireRole('organizator'), async (req, res) => {
     const validationError = validateEventPayload(req.body);
     if (validationError) {
         return sendError(res, 400, validationError);
@@ -633,7 +893,7 @@ app.post('/api/events', authenticate, requireRole('organizator'), async (req, re
     return res.status(201).json(enrichEvent(event));
 });
 
-app.put('/api/events/:id', authenticate, requireRole('organizator'), requireEventOwner, async (req, res) => {
+app.put('/api/events/:id', authenticate, requireScope('write', 'events'), requireRole('organizator'), requireEventOwner, async (req, res) => {
     const validationError = validateEventPayload(req.body, true);
     if (validationError) {
         return sendError(res, 400, validationError);
@@ -675,7 +935,7 @@ app.put('/api/events/:id', authenticate, requireRole('organizator'), requireEven
     return res.json(enrichEvent(req.event));
 });
 
-app.delete('/api/events/:id', authenticate, requireRole('organizator'), requireEventOwner, (req, res) => {
+app.delete('/api/events/:id', authenticate, requireScope('write', 'events'), requireRole('organizator'), requireEventOwner, (req, res) => {
     const registrationUserIds = eventRegistrations(req.event.id).map((registration) => registration.uporabnik_id);
     db.events = db.events.filter((event) => event.id !== req.event.id);
     db.registrations = db.registrations.filter((registration) => registration.dogodek_id !== req.event.id);
@@ -688,11 +948,11 @@ app.delete('/api/events/:id', authenticate, requireRole('organizator'), requireE
     return res.status(204).send();
 });
 
-app.get('/api/me', authenticate, (req, res) => {
+app.get('/api/me', authenticate, requireScope('read'), (req, res) => {
     return res.json(publicUser(req.user));
 });
 
-app.get('/api/me/registrations', authenticate, (req, res) => {
+app.get('/api/me/registrations', authenticate, requireScope('read', 'registrations'), (req, res) => {
     const registrations = db.registrations
         .filter((registration) => registration.uporabnik_id === req.user.id)
         .map((registration) => ({
@@ -704,7 +964,7 @@ app.get('/api/me/registrations', authenticate, (req, res) => {
     return res.json(registrations);
 });
 
-app.get('/api/notifications', authenticate, (req, res) => {
+app.get('/api/notifications', authenticate, requireScope('read', 'notifications'), (req, res) => {
     let notifications = db.notifications.filter((notification) => notification.uporabnik_id === req.user.id);
     if (req.query.prebrano !== undefined) {
         notifications = notifications.filter((notification) => {
@@ -718,7 +978,7 @@ app.get('/api/notifications', authenticate, (req, res) => {
     })));
 });
 
-app.put('/api/notifications/:id/read', authenticate, (req, res) => {
+app.put('/api/notifications/:id/read', authenticate, requireScope('notifications'), (req, res) => {
     const notification = db.notifications.find((candidate) => candidate.id === req.params.id);
     if (!notification) {
         return sendError(res, 404, 'Obvestilo ne obstaja.');
@@ -732,7 +992,7 @@ app.put('/api/notifications/:id/read', authenticate, (req, res) => {
     return res.json({ id: notification.id, prebrano: notification.prebrano });
 });
 
-app.delete('/api/notifications/:id', authenticate, (req, res) => {
+app.delete('/api/notifications/:id', authenticate, requireScope('notifications'), (req, res) => {
     const notification = db.notifications.find((candidate) => candidate.id === req.params.id);
     if (!notification) {
         return sendError(res, 404, 'Obvestilo ne obstaja.');
