@@ -157,33 +157,7 @@ Osnovni opis API-ja je dostopen na:
 http://localhost:3000/api
 ```
 
-## Namestitev in zagon
-
-Odvisnosti namestite z:
-
-```powershell
-npm install
-```
-
-Streznik zazenete z:
-
-```powershell
-npm start
-```
-
-Node.js testnega odjemalca zazenete v drugem terminalu:
-
-```powershell
-npm run client
-```
-
-Sintakso streznika in odjemalca preverite z:
-
-```powershell
-npm run check
-```
-
-## PWA nadgradnja
+## PWA
 
 Dodana je bila progresivna spletna aplikacija (PWA), napisana samo z HTML, CSS in vanilla JavaScript. Aplikacija je dostopna na:
 
