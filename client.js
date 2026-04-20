@@ -174,6 +174,7 @@ async function runDemo() {
         naziv: `OAuth demo dogodek ${Date.now()}`,
         opis: 'Dogodek ustvarjen iz Node.js OAuth odjemalca.',
         datum: '2026-06-01',
+        datum_do: '2026-06-02',
         ura: '18:30',
         lokacija: 'Glavni trg Maribor',
         koordinate_lat: 46.5574,

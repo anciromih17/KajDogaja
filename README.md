@@ -156,3 +156,79 @@ Osnovni opis API-ja je dostopen na:
 ```text
 http://localhost:3000/api
 ```
+
+## Namestitev in zagon
+
+Odvisnosti namestite z:
+
+```powershell
+npm install
+```
+
+Streznik zazenete z:
+
+```powershell
+npm start
+```
+
+Node.js testnega odjemalca zazenete v drugem terminalu:
+
+```powershell
+npm run client
+```
+
+Sintakso streznika in odjemalca preverite z:
+
+```powershell
+npm run check
+```
+
+## PWA nadgradnja
+
+Dodana je bila progresivna spletna aplikacija (PWA), napisana samo z HTML, CSS in vanilla JavaScript. Aplikacija je dostopna na:
+
+```text
+http://localhost:3000/pwa
+```
+
+PWA uporablja isti REST API kot Node.js odjemalec. Ob zagonu se prijavi kot demo organizator, pridobi OAuth access token in nato s tem tokenom kliče zaščitene endpoint-e za dodajanje, urejanje in brisanje dogodkov.
+
+PWA vsebuje:
+
+- prikaz seznama dogodkov iz REST API-ja,
+- iskanje dogodkov prek query parametrov REST API-ja,
+- dodajanje novega dogodka,
+- urejanje obstoječega dogodka,
+- brisanje dogodka,
+- sistemska obvestila ob uspešnem shranjevanju, napakah in novih podatkih,
+- bližnjice s tipkovnico `Ctrl+K`, `Alt+N` in `Ctrl+S`,
+- `manifest.webmanifest` z imenom aplikacije, barvami, ikonami in bližnjicami,
+- `serviceWorker` za predpomnjenje statičnih datotek aplikacije,
+- lokalno shrambo v `localStorage`,
+- shranjevanje čakajočih sprememb ob izgubi povezave,
+- sinhronizacijo čakajočih sprememb ob ponovni vzpostavitvi povezave,
+- leno nalaganje QR slik z `IntersectionObserver`,
+- CORS podporo na strežniku,
+- endpoint-e za push obvestila.
+
+PWA datoteke:
+
+```text
+public/index.html
+public/styles.css
+public/app.js
+public/sw.js
+public/manifest.webmanifest
+public/icons/icon-192.svg
+public/icons/icon-512.svg
+```
+
+Push endpointi:
+
+```text
+POST /api/push/subscribe
+POST /api/push/send
+GET  /api/push/messages
+```
+
+Service worker vsebuje tudi `push` event listener. Ker projekt ne uporablja zunanjega Web Push ponudnika, aplikacija push sporočila pripravi prek REST endpointov, jih prevzame ob sinhronizaciji in jih preko service workerja prikaže kot sistemska obvestila.
