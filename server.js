@@ -1,318 +1,762 @@
-const http = require('http');
+const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const url = require('url');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const QRCode = require('qrcode');
 
-const PORT = 3000;
+const app = express();
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'kajdogaja-development-secret';
+const DATA_DIR = path.join(__dirname, 'data');
+const DB_PATH = path.join(DATA_DIR, 'db.json');
 
-function sendFile(res, filePath, contentType, statusCode = 200) {
-    fs.readFile(filePath, (err, data) => {
-        if (err) {
-            if (err.code === 'ENOENT') {
-                res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-                res.end('Napaka 404: Datoteka ni bila najdena.');
-            } else {
-                res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-                res.end('Napaka 500: Prišlo je do napake na strežniku.');
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+function now() {
+    return new Date().toISOString();
+}
+
+function id(prefix) {
+    return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function seedDb() {
+    const organizerPassword = bcrypt.hashSync('organizator123', 10);
+    const userPassword = bcrypt.hashSync('uporabnik123', 10);
+    const created = now();
+
+    return {
+        users: [
+            {
+                id: 'usr_organizator',
+                uporabnisko_ime: 'Demo Organizator',
+                email: 'organizator@kajdogaja.si',
+                geslo_hash: organizerPassword,
+                vloga: 'organizator',
+                ustvarjen: created
+            },
+            {
+                id: 'usr_uporabnik',
+                uporabnisko_ime: 'Demo Uporabnik',
+                email: 'uporabnik@kajdogaja.si',
+                geslo_hash: userPassword,
+                vloga: 'uporabnik',
+                ustvarjen: created
             }
-            return;
-        }
+        ],
+        categories: [
+            { id: 'cat_sport', naziv: 'sport' },
+            { id: 'cat_kultura', naziv: 'kultura' },
+            { id: 'cat_glasba', naziv: 'glasba' },
+            { id: 'cat_festival', naziv: 'festival' }
+        ],
+        cities: [
+            { id: 'city_ljubljana', naziv: 'Ljubljana', koordinate_lat: 46.0569, koordinate_lng: 14.5058 },
+            { id: 'city_maribor', naziv: 'Maribor', koordinate_lat: 46.5547, koordinate_lng: 15.6459 },
+            { id: 'city_celje', naziv: 'Celje', koordinate_lat: 46.2397, koordinate_lng: 15.2677 }
+        ],
+        events: [
+            {
+                id: 'evt_koncert_maribor',
+                naziv: 'Vecerni koncert v parku',
+                opis: 'Odprt glasbeni dogodek z lokalnimi izvajalci.',
+                datum: '2026-05-15',
+                ura: '20:00',
+                lokacija: 'Mestni park Maribor',
+                koordinate_lat: 46.5622,
+                koordinate_lng: 15.6431,
+                kapaciteta: 120,
+                qr_koda_url: '',
+                kategorija_id: 'cat_glasba',
+                mesto_id: 'city_maribor',
+                organizator_id: 'usr_organizator',
+                ustvarjen: created,
+                posodobljen: created
+            },
+            {
+                id: 'evt_tek_ljubljana',
+                naziv: 'Dobrodelni tek',
+                opis: 'Sportni dogodek za vse generacije.',
+                datum: '2026-05-22',
+                ura: '10:00',
+                lokacija: 'Tivoli Ljubljana',
+                koordinate_lat: 46.0593,
+                koordinate_lng: 14.4976,
+                kapaciteta: 300,
+                qr_koda_url: '',
+                kategorija_id: 'cat_sport',
+                mesto_id: 'city_ljubljana',
+                organizator_id: 'usr_organizator',
+                ustvarjen: created,
+                posodobljen: created
+            }
+        ],
+        registrations: [
+            {
+                id: 'reg_demo',
+                uporabnik_id: 'usr_uporabnik',
+                dogodek_id: 'evt_koncert_maribor',
+                status: 'potrjena',
+                ustvarjena: created
+            }
+        ],
+        notifications: [
+            {
+                id: 'not_demo',
+                uporabnik_id: 'usr_uporabnik',
+                dogodek_id: 'evt_koncert_maribor',
+                tip: 'opomnik',
+                vsebina: 'Ne pozabite na koncert v parku.',
+                prebrano: false,
+                ustvarjeno: created
+            }
+        ],
+        revokedTokens: []
+    };
+}
 
-        res.writeHead(statusCode, { 'Content-Type': contentType });
-        res.end(data);
+function loadDb() {
+    if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR);
+    }
+
+    if (!fs.existsSync(DB_PATH)) {
+        const initial = seedDb();
+        fs.writeFileSync(DB_PATH, JSON.stringify(initial, null, 2));
+        return initial;
+    }
+
+    return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+}
+
+let db = loadDb();
+
+async function ensureQrCodes() {
+    let changed = false;
+    for (const event of db.events) {
+        if (!event.qr_koda_url) {
+            event.qr_koda_url = await QRCode.toDataURL(`http://localhost:${PORT}/api/events/${event.id}`);
+            changed = true;
+        }
+    }
+    if (changed) {
+        saveDb();
+    }
+}
+
+function saveDb() {
+    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+}
+
+function sendError(res, status, message) {
+    return res.status(status).json({ napaka: message, koda: status });
+}
+
+function publicUser(user) {
+    if (!user) {
+        return null;
+    }
+    return {
+        id: user.id,
+        uporabnisko_ime: user.uporabnisko_ime,
+        email: user.email,
+        vloga: user.vloga,
+        ustvarjen: user.ustvarjen
+    };
+}
+
+function findEvent(eventId) {
+    return db.events.find((event) => event.id === eventId);
+}
+
+function eventRegistrations(eventId) {
+    return db.registrations.filter((registration) => {
+        return registration.dogodek_id === eventId && registration.status === 'potrjena';
     });
 }
 
-const server = http.createServer((req, res) => {
-    const parsedUrl = url.parse(req.url, true);
-    const pathname = parsedUrl.pathname;
+function enrichEvent(event) {
+    if (!event) {
+        return null;
+    }
 
-    if (pathname === '/') {
-        const homePage = `
+    return {
+        ...event,
+        kategorija: db.categories.find((category) => category.id === event.kategorija_id) || null,
+        mesto: db.cities.find((city) => city.id === event.mesto_id) || null,
+        organizator: publicUser(db.users.find((user) => user.id === event.organizator_id)),
+        st_prijav: eventRegistrations(event.id).length
+    };
+}
+
+function authenticate(req, res, next) {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+    if (!token) {
+        return sendError(res, 401, 'Manjka JWT zeton.');
+    }
+
+    if (db.revokedTokens.includes(token)) {
+        return sendError(res, 401, 'Zeton ni vec veljaven.');
+    }
+
+    try {
+        const payload = jwt.verify(token, JWT_SECRET);
+        const user = db.users.find((candidate) => candidate.id === payload.id);
+        if (!user) {
+            return sendError(res, 401, 'Uporabnik ne obstaja.');
+        }
+
+        req.user = user;
+        req.token = token;
+        return next();
+    } catch (error) {
+        return sendError(res, 401, 'Neveljaven JWT zeton.');
+    }
+}
+
+function requireRole(role) {
+    return (req, res, next) => {
+        if (req.user.vloga !== role) {
+            return sendError(res, 403, `Dostop dovoljen samo za vlogo ${role}.`);
+        }
+        return next();
+    };
+}
+
+function requireEventOwner(req, res, next) {
+    const event = findEvent(req.params.id);
+    if (!event) {
+        return sendError(res, 404, 'Dogodek ne obstaja.');
+    }
+    if (event.organizator_id !== req.user.id) {
+        return sendError(res, 403, 'Dogodek lahko ureja samo njegov organizator.');
+    }
+    req.event = event;
+    return next();
+}
+
+function isValidDate(value) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(value || '');
+}
+
+function isValidTime(value) {
+    return /^\d{2}:\d{2}$/.test(value || '');
+}
+
+function validateEventPayload(payload, partial = false) {
+    const required = ['naziv', 'opis', 'datum', 'ura', 'lokacija', 'kategorija_id', 'mesto_id'];
+    if (!partial) {
+        for (const field of required) {
+            if (!payload[field]) {
+                return `Manjka polje ${field}.`;
+            }
+        }
+    }
+
+    if (payload.datum !== undefined && !isValidDate(payload.datum)) {
+        return 'Datum mora biti v obliki YYYY-MM-DD.';
+    }
+
+    if (payload.ura !== undefined && !isValidTime(payload.ura)) {
+        return 'Ura mora biti v obliki HH:MM.';
+    }
+
+    if (payload.kapaciteta !== undefined && payload.kapaciteta !== null && Number(payload.kapaciteta) < 1) {
+        return 'Kapaciteta mora biti pozitivno stevilo ali null.';
+    }
+
+    if (payload.kategorija_id && !db.categories.some((category) => category.id === payload.kategorija_id)) {
+        return 'Kategorija ne obstaja.';
+    }
+
+    if (payload.mesto_id && !db.cities.some((city) => city.id === payload.mesto_id)) {
+        return 'Mesto ne obstaja.';
+    }
+
+    return null;
+}
+
+function distanceKm(lat1, lng1, lat2, lng2) {
+    const radius = 6371;
+    const toRad = (value) => (value * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return radius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function registrationsByDay(eventId) {
+    const result = new Map();
+    for (const registration of eventRegistrations(eventId)) {
+        const day = registration.ustvarjena.slice(0, 10);
+        result.set(day, (result.get(day) || 0) + 1);
+    }
+    return Array.from(result.entries()).map(([datum, stevilo]) => ({ datum, stevilo }));
+}
+
+function createNotification(userId, eventId, tip, vsebina) {
+    db.notifications.push({
+        id: id('not'),
+        uporabnik_id: userId,
+        dogodek_id: eventId,
+        tip,
+        vsebina,
+        prebrano: false,
+        ustvarjeno: now()
+    });
+}
+
+app.get('/', (req, res) => {
+    res.type('html').send(`
 <!DOCTYPE html>
 <html lang="sl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KajDogaja - Domov</title>
+    <title>KajDogaja - REST API</title>
     <style>
-        * {
-            box-sizing: border-box;
-        }
-
-        body {
-            margin: 0;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: linear-gradient(135deg, #eef3ff 0%, #f8fbff 100%);
-            color: #1f2937;
-        }
-
-        .page {
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 40px 20px;
-        }
-
-        .card {
-            width: 100%;
-            max-width: 950px;
-            background: #ffffff;
-            border-radius: 22px;
-            padding: 40px;
-            box-shadow: 0 18px 45px rgba(31, 60, 136, 0.12);
-            border: 1px solid #e5eaf5;
-        }
-
-        .badge {
-            display: inline-block;
-            background: #e8efff;
-            color: #1f3c88;
-            font-size: 0.9rem;
-            font-weight: 700;
-            padding: 8px 14px;
-            border-radius: 999px;
-            margin-bottom: 18px;
-        }
-
-        h1 {
-            margin: 0 0 12px 0;
-            font-size: 2.4rem;
-            color: #1f3c88;
-            letter-spacing: -0.02em;
-        }
-
-        .subtitle {
-            margin: 0 0 30px 0;
-            font-size: 1.05rem;
-            line-height: 1.7;
-            color: #4b5563;
-            max-width: 760px;
-        }
-
-        .section-title {
-            margin: 34px 0 14px 0;
-            font-size: 1.2rem;
-            color: #1f3c88;
-        }
-
-        .routes {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 18px;
-            margin-top: 18px;
-        }
-
-        .route-card {
-            background: #f8faff;
-            border: 1px solid #dbe5ff;
-            border-radius: 16px;
-            padding: 18px;
-            transition: transform 0.15s ease, box-shadow 0.15s ease;
-        }
-
-        .route-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(31, 60, 136, 0.08);
-        }
-
-        .route-card a {
-            text-decoration: none;
-            color: inherit;
-            display: block;
-        }
-
-        .route-path {
-            display: inline-block;
-            font-family: Consolas, Monaco, monospace;
-            font-size: 0.95rem;
-            background: #eef2ff;
-            color: #1f3c88;
-            padding: 6px 10px;
-            border-radius: 10px;
-            margin-bottom: 10px;
-        }
-
-        .route-title {
-            margin: 0 0 8px 0;
-            font-size: 1.05rem;
-            color: #111827;
-        }
-
-        .route-desc {
-            margin: 0;
-            color: #4b5563;
-            line-height: 1.6;
-            font-size: 0.95rem;
-        }
-
-        .footer-note {
-            margin-top: 34px;
-            padding-top: 18px;
-            border-top: 1px solid #e5e7eb;
-            color: #6b7280;
-            font-size: 0.95rem;
-            line-height: 1.6;
-        }
-
-        code {
-            background: #eef2ff;
-            color: #1f3c88;
-            padding: 2px 6px;
-            border-radius: 6px;
-            font-family: Consolas, Monaco, monospace;
-        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f8fbff; color: #1f2937; }
+        main { max-width: 980px; margin: 0 auto; padding: 40px 20px; }
+        h1 { color: #1f3c88; margin-bottom: 8px; }
+        p { color: #4b5563; line-height: 1.6; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 24px; }
+        a { display: block; padding: 16px; border: 1px solid #dbe5ff; border-radius: 8px; background: #fff; color: #1f3c88; text-decoration: none; font-weight: 650; }
+        code { background: #eef2ff; padding: 2px 6px; border-radius: 6px; }
     </style>
 </head>
 <body>
-    <div class="page">
-        <div class="card">
-            <h1>KajDogaja</h1>
-
-            <h2 class="section-title">Povezave</h2>
-
-            <div class="routes">
-                <div class="route-card">
-                    <a href="/funkcionalnosti-odjemalca/">
-                        <div class="route-path">/funkcionalnosti-odjemalca/</div>
-                        <h3 class="route-title">Funkcionalnosti odjemalca</h3>
-                        <p class="route-desc">
-                            HTML dokument z opisom uporabniških funkcionalnosti aplikacije KajDogaja
-                            ter vključenim UML diagramom primerov uporabe.
-                        </p>
-                    </a>
-                </div>
-
-                <div class="route-card">
-                    <a href="/posebnosti/">
-                        <div class="route-path">/posebnosti/</div>
-                        <h3 class="route-title">Tehnične posebnosti</h3>
-                        <p class="route-desc">
-                            Tekstovna predstavitev tehničnih zahtev odjemalskega dela, uporabe kamere,
-                            geolokacije, offline podpore in drugih posebnosti implementacije.
-                        </p>
-                    </a>
-                </div>
-
-                <div class="route-card">
-                    <a href="/funkcionalnosti-streznika/">
-                        <div class="route-path">/funkcionalnosti-streznika/</div>
-                        <h3 class="route-title">Funkcionalnosti strežnika</h3>
-                        <p class="route-desc">
-                            HTML dokument z opisom strežniških funkcionalnosti, kot so
-                            JWT avtentikacija, upravljanje dogodkov, QR kode, obvestila in statistika.
-                        </p>
-                    </a>
-                </div>
-
-                <div class="route-card">
-                    <a href="/tehnicne-zahteve-streznika/">
-                        <div class="route-path">/tehnicne-zahteve-streznika/</div>
-                        <h3 class="route-title">Tehnične zahteve strežnika</h3>
-                        <p class="route-desc">
-                            Tekstovni dokument z uporabo tehnologij Express, JWT, bcrypt,
-                            knjižnice za QR generiranje in podatkovne baze.
-                        </p>
-                    </a>
-                </div>
-
-                <div class="route-card">
-                    <a href="/podatkovni-model/">
-                        <div class="route-path">/podatkovni-model/</div>
-                        <h3 class="route-title">Podatkovni model</h3>
-                        <p class="route-desc">
-                            HTML dokument z entitetami, atributi, relacijami, dostopnostjo podatkov
-                            (naprava / strežnik / sinhronizacija) in ER diagramom.
-                        </p>
-                    </a>
-                </div>
-
-                <div class="route-card">
-                    <a href="/REST/">
-                        <div class="route-path">/REST/</div>
-                        <h3 class="route-title">REST API</h3>
-                        <p class="route-desc">
-                            Tekstovni dokument z naborom REST storitev in metod za podporo
-                            hibridne namizne aplikacije.
-                        </p>
-                    </a>
-                </div>
-
-                <div class="route-card">
-                    <a href="/img/uml_odjemalec.png">
-                        <div class="route-path">/img/uml_odjemalec.png</div>
-                        <h3 class="route-title">UML diagram odjemalca</h3>
-                        <p class="route-desc">
-                            Neposreden dostop do slike UML diagrama primerov uporabe za odjemalski del aplikacije.
-                        </p>
-                    </a>
-                </div>
-
-                <div class="route-card">
-                    <a href="/img/uml_streznik.png">
-                        <div class="route-path">/img/uml_streznik.png</div>
-                        <h3 class="route-title">UML diagram strežnika</h3>
-                        <p class="route-desc">
-                            Neposreden dostop do slike UML diagrama primerov uporabe za strežniški del aplikacije.
-                        </p>
-                    </a>
-                </div>
-            </div>
+    <main>
+        <h1>KajDogaja</h1>
+        <p>Express REST API je na voljo pod <code>/api</code>. Spodaj so se vedno dostopni dokumenti idejne zasnove.</p>
+        <div class="grid">
+            <a href="/api">/api</a>
+            <a href="/funkcionalnosti-odjemalca/">Funkcionalnosti odjemalca</a>
+            <a href="/funkcionalnosti-streznika/">Funkcionalnosti streznika</a>
+            <a href="/podatkovni-model/">Podatkovni model</a>
+            <a href="/posebnosti/">Posebnosti</a>
+            <a href="/tehnicne-zahteve-streznika/">Tehnicne zahteve streznika</a>
+            <a href="/REST/">REST zasnova</a>
         </div>
-    </div>
+    </main>
 </body>
-</html>
-    `;
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(homePage);
-    }
-    else if (pathname === '/funkcionalnosti-odjemalca/' || pathname === '/funkcionalnosti-odjemalca') {
-        const filePath = path.join(__dirname, 'pages', 'funkcionalnosti-odjemalca.html');
-        sendFile(res, filePath, 'text/html; charset=utf-8');
-    }
-
-    else if (pathname === '/funkcionalnosti-streznika/' || pathname === '/funkcionalnosti-streznika') {
-        const filePath = path.join(__dirname, 'pages', 'funkcionalnosti-streznika.html');
-        sendFile(res, filePath, 'text/html; charset=utf-8');
-    }
-
-    else if (pathname === '/posebnosti/' || pathname === '/posebnosti') {
-        const filePath = path.join(__dirname, 'texts', 'posebnosti.txt');
-        sendFile(res, filePath, 'text/plain; charset=utf-8');
-    }
-
-    else if (pathname === '/tehnicne-zahteve-streznika/' || pathname === '/tehnicne-zahteve-streznika') {
-        const filePath = path.join(__dirname, 'texts', 'tehnicne-zahteve-streznika.txt');
-        sendFile(res, filePath, 'text/plain; charset=utf-8');
-    }
-
-    else if (pathname === '/podatkovni-model/' || pathname === '/podatkovni-model') {
-        const filePath = path.join(__dirname, 'pages', 'podatkovni-model.html');
-        sendFile(res, filePath, 'text/html; charset=utf-8');
-    }
-
-    else if (pathname === '/REST/' || pathname === '/REST') {
-        const filePath = path.join(__dirname, 'texts', 'rest.txt');
-        sendFile(res, filePath, 'text/plain; charset=utf-8');
-    }
-
-    else if (pathname === '/img/uml_odjemalec.png') {
-        const filePath = path.join(__dirname, 'img', 'uml_odjemalec.png');
-        sendFile(res, filePath, 'image/png');
-    }
-
-    else if (pathname === '/img/uml_streznik.png') {
-        const filePath = path.join(__dirname, 'img', 'uml_streznik.png');
-        sendFile(res, filePath, 'image/png');
-    }
-
-    else {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Napaka 404: Stran ne obstaja.');
-    }
+</html>`);
 });
 
-server.listen(PORT, () => {
-    console.log(`Strežnik deluje na naslovu: http://localhost:${PORT}`);
+app.get('/funkcionalnosti-odjemalca/?', (req, res) => {
+    res.sendFile(path.join(__dirname, 'pages', 'funkcionalnosti-odjemalca.html'));
+});
+
+app.get('/funkcionalnosti-streznika/?', (req, res) => {
+    res.sendFile(path.join(__dirname, 'pages', 'funkcionalnosti-streznika.html'));
+});
+
+app.get('/podatkovni-model/?', (req, res) => {
+    res.sendFile(path.join(__dirname, 'pages', 'podatkovni-model.html'));
+});
+
+app.get('/posebnosti/?', (req, res) => {
+    res.type('text/plain; charset=utf-8').sendFile(path.join(__dirname, 'texts', 'posebnosti.txt'));
+});
+
+app.get('/tehnicne-zahteve-streznika/?', (req, res) => {
+    res.type('text/plain; charset=utf-8').sendFile(path.join(__dirname, 'texts', 'tehnicne-zahteve-streznika.txt'));
+});
+
+app.get('/REST/?', (req, res) => {
+    res.type('text/plain; charset=utf-8').sendFile(path.join(__dirname, 'texts', 'rest.txt'));
+});
+
+app.use('/img', express.static(path.join(__dirname, 'img')));
+
+app.get('/api', (req, res) => {
+    res.json({
+        ime: 'KajDogaja REST API',
+        verzija: '1.0.0',
+        endpointi: [
+            'POST /api/auth/register',
+            'POST /api/auth/login',
+            'POST /api/auth/logout',
+            'GET /api/events',
+            'GET /api/events/:id',
+            'POST /api/events',
+            'PUT /api/events/:id',
+            'DELETE /api/events/:id',
+            'GET /api/events/:id/qr',
+            'GET /api/events/:id/registrations',
+            'POST /api/events/:id/registrations',
+            'DELETE /api/events/:id/registrations',
+            'GET /api/me',
+            'GET /api/me/registrations',
+            'GET /api/notifications',
+            'PUT /api/notifications/:id/read',
+            'DELETE /api/notifications/:id',
+            'GET /api/events/:id/stats',
+            'GET /api/categories',
+            'GET /api/cities'
+        ]
+    });
+});
+
+app.post('/api/auth/register', async (req, res) => {
+    const { uporabnisko_ime, email, geslo, vloga = 'uporabnik' } = req.body;
+    if (!uporabnisko_ime || !email || !geslo) {
+        return sendError(res, 400, 'Manjkajo obvezna polja.');
+    }
+
+    if (!['uporabnik', 'organizator'].includes(vloga)) {
+        return sendError(res, 400, 'Vloga mora biti uporabnik ali organizator.');
+    }
+
+    if (db.users.some((user) => user.email.toLowerCase() === email.toLowerCase())) {
+        return sendError(res, 409, 'Email ze obstaja.');
+    }
+
+    const user = {
+        id: id('usr'),
+        uporabnisko_ime,
+        email,
+        geslo_hash: await bcrypt.hash(geslo, 10),
+        vloga,
+        ustvarjen: now()
+    };
+    db.users.push(user);
+    saveDb();
+    return res.status(201).json(publicUser(user));
+});
+
+app.post('/api/auth/login', async (req, res) => {
+    const { email, geslo } = req.body;
+    const user = db.users.find((candidate) => candidate.email.toLowerCase() === String(email || '').toLowerCase());
+    if (!user || !(await bcrypt.compare(String(geslo || ''), user.geslo_hash))) {
+        return sendError(res, 401, 'Napacni prijavni podatki.');
+    }
+
+    const token = jwt.sign(
+        { id: user.id, vloga: user.vloga, uporabnisko_ime: user.uporabnisko_ime },
+        JWT_SECRET,
+        { expiresIn: '2h' }
+    );
+
+    return res.json({
+        token,
+        uporabnik: {
+            id: user.id,
+            vloga: user.vloga,
+            uporabnisko_ime: user.uporabnisko_ime
+        }
+    });
+});
+
+app.post('/api/auth/logout', authenticate, (req, res) => {
+    db.revokedTokens.push(req.token);
+    saveDb();
+    return res.json({ sporocilo: 'Odjava uspesna.' });
+});
+
+app.get('/api/categories', (req, res) => {
+    res.json(db.categories);
+});
+
+app.get('/api/cities', (req, res) => {
+    res.json(db.cities);
+});
+
+app.get('/api/events', (req, res) => {
+    const { city, date, category, q, lat, lng, radius = 10, page = 1, limit = 50 } = req.query;
+    let events = [...db.events];
+
+    if (city) {
+        const query = String(city).toLowerCase();
+        events = events.filter((event) => {
+            const cityRecord = db.cities.find((candidate) => candidate.id === event.mesto_id);
+            return event.mesto_id === city || (cityRecord && cityRecord.naziv.toLowerCase() === query);
+        });
+    }
+
+    if (date) {
+        const parts = String(date).split(',');
+        if (parts.length === 2) {
+            events = events.filter((event) => event.datum >= parts[0] && event.datum <= parts[1]);
+        } else {
+            events = events.filter((event) => event.datum === date);
+        }
+    }
+
+    if (category) {
+        events = events.filter((event) => event.kategorija_id === category);
+    }
+
+    if (q) {
+        const query = String(q).toLowerCase();
+        events = events.filter((event) => {
+            return event.naziv.toLowerCase().includes(query) || event.opis.toLowerCase().includes(query);
+        });
+    }
+
+    if (lat && lng) {
+        const parsedLat = Number(lat);
+        const parsedLng = Number(lng);
+        const parsedRadius = Number(radius);
+        events = events.filter((event) => {
+            return distanceKm(parsedLat, parsedLng, Number(event.koordinate_lat), Number(event.koordinate_lng)) <= parsedRadius;
+        });
+    }
+
+    const startIndex = (Number(page) - 1) * Number(limit);
+    const paged = events.slice(startIndex, startIndex + Number(limit));
+    return res.json(paged.map(enrichEvent));
+});
+
+app.get('/api/events/:id/qr', (req, res) => {
+    const event = findEvent(req.params.id);
+    if (!event) {
+        return sendError(res, 404, 'Dogodek ne obstaja.');
+    }
+    return res.json({ qr_koda_url: event.qr_koda_url });
+});
+
+app.get('/api/events/:id/registrations', authenticate, requireRole('organizator'), requireEventOwner, (req, res) => {
+    const registrations = eventRegistrations(req.event.id).map((registration) => ({
+        id: registration.id,
+        uporabnik: publicUser(db.users.find((user) => user.id === registration.uporabnik_id)),
+        status: registration.status,
+        ustvarjena: registration.ustvarjena
+    }));
+    return res.json(registrations);
+});
+
+app.post('/api/events/:id/registrations', authenticate, requireRole('uporabnik'), (req, res) => {
+    const event = findEvent(req.params.id);
+    if (!event) {
+        return sendError(res, 404, 'Dogodek ne obstaja.');
+    }
+
+    const existing = db.registrations.find((registration) => {
+        return registration.dogodek_id === event.id
+            && registration.uporabnik_id === req.user.id
+            && registration.status === 'potrjena';
+    });
+    if (existing) {
+        return sendError(res, 409, 'Uporabnik je ze prijavljen na dogodek.');
+    }
+
+    if (event.kapaciteta !== null && eventRegistrations(event.id).length >= Number(event.kapaciteta)) {
+        return sendError(res, 410, 'Dogodek je poln.');
+    }
+
+    const registration = {
+        id: id('reg'),
+        uporabnik_id: req.user.id,
+        dogodek_id: event.id,
+        status: 'potrjena',
+        ustvarjena: now()
+    };
+    db.registrations.push(registration);
+    saveDb();
+
+    return res.status(201).json({
+        id: registration.id,
+        status: registration.status,
+        dogodek_id: registration.dogodek_id
+    });
+});
+
+app.delete('/api/events/:id/registrations', authenticate, requireRole('uporabnik'), (req, res) => {
+    const index = db.registrations.findIndex((registration) => {
+        return registration.dogodek_id === req.params.id
+            && registration.uporabnik_id === req.user.id
+            && registration.status === 'potrjena';
+    });
+
+    if (index === -1) {
+        return sendError(res, 404, 'Prijava ne obstaja.');
+    }
+
+    db.registrations.splice(index, 1);
+    saveDb();
+    return res.status(204).send();
+});
+
+app.get('/api/events/:id/stats', authenticate, requireRole('organizator'), requireEventOwner, (req, res) => {
+    const total = eventRegistrations(req.event.id).length;
+    const capacity = req.event.kapaciteta;
+    return res.json({
+        skupaj_prijav: total,
+        kapaciteta: capacity,
+        zasedenost_odstotek: capacity ? Math.round((total / capacity) * 100) : null,
+        prostih_mest: capacity ? Math.max(Number(capacity) - total, 0) : null,
+        prijave_po_dnevih: registrationsByDay(req.event.id)
+    });
+});
+
+app.get('/api/events/:id', (req, res) => {
+    const event = findEvent(req.params.id);
+    if (!event) {
+        return sendError(res, 404, 'Dogodek ne obstaja.');
+    }
+    return res.json(enrichEvent(event));
+});
+
+app.post('/api/events', authenticate, requireRole('organizator'), async (req, res) => {
+    const validationError = validateEventPayload(req.body);
+    if (validationError) {
+        return sendError(res, 400, validationError);
+    }
+
+    const event = {
+        id: id('evt'),
+        naziv: req.body.naziv,
+        opis: req.body.opis,
+        datum: req.body.datum,
+        ura: req.body.ura,
+        lokacija: req.body.lokacija,
+        koordinate_lat: Number(req.body.koordinate_lat),
+        koordinate_lng: Number(req.body.koordinate_lng),
+        kapaciteta: req.body.kapaciteta === null ? null : Number(req.body.kapaciteta || 0),
+        qr_koda_url: '',
+        kategorija_id: req.body.kategorija_id,
+        mesto_id: req.body.mesto_id,
+        organizator_id: req.user.id,
+        ustvarjen: now(),
+        posodobljen: now()
+    };
+
+    event.qr_koda_url = await QRCode.toDataURL(`http://localhost:${PORT}/api/events/${event.id}`);
+    db.events.push(event);
+    saveDb();
+    return res.status(201).json(enrichEvent(event));
+});
+
+app.put('/api/events/:id', authenticate, requireRole('organizator'), requireEventOwner, async (req, res) => {
+    const validationError = validateEventPayload(req.body, true);
+    if (validationError) {
+        return sendError(res, 400, validationError);
+    }
+
+    const editable = [
+        'naziv',
+        'opis',
+        'datum',
+        'ura',
+        'lokacija',
+        'koordinate_lat',
+        'koordinate_lng',
+        'kapaciteta',
+        'kategorija_id',
+        'mesto_id'
+    ];
+
+    for (const field of editable) {
+        if (req.body[field] !== undefined) {
+            req.event[field] = ['koordinate_lat', 'koordinate_lng', 'kapaciteta'].includes(field) && req.body[field] !== null
+                ? Number(req.body[field])
+                : req.body[field];
+        }
+    }
+
+    req.event.posodobljen = now();
+    const registrations = eventRegistrations(req.event.id);
+    for (const registration of registrations) {
+        createNotification(
+            registration.uporabnik_id,
+            req.event.id,
+            'sprememba',
+            `Dogodek "${req.event.naziv}" je bil posodobljen.`
+        );
+    }
+
+    saveDb();
+    return res.json(enrichEvent(req.event));
+});
+
+app.delete('/api/events/:id', authenticate, requireRole('organizator'), requireEventOwner, (req, res) => {
+    const registrationUserIds = eventRegistrations(req.event.id).map((registration) => registration.uporabnik_id);
+    db.events = db.events.filter((event) => event.id !== req.event.id);
+    db.registrations = db.registrations.filter((registration) => registration.dogodek_id !== req.event.id);
+
+    for (const userId of registrationUserIds) {
+        createNotification(userId, req.event.id, 'odpoved', `Dogodek "${req.event.naziv}" je bil odpovedan.`);
+    }
+
+    saveDb();
+    return res.status(204).send();
+});
+
+app.get('/api/me', authenticate, (req, res) => {
+    return res.json(publicUser(req.user));
+});
+
+app.get('/api/me/registrations', authenticate, (req, res) => {
+    const registrations = db.registrations
+        .filter((registration) => registration.uporabnik_id === req.user.id)
+        .map((registration) => ({
+            id: registration.id,
+            status: registration.status,
+            ustvarjena: registration.ustvarjena,
+            dogodek: enrichEvent(findEvent(registration.dogodek_id))
+        }));
+    return res.json(registrations);
+});
+
+app.get('/api/notifications', authenticate, (req, res) => {
+    let notifications = db.notifications.filter((notification) => notification.uporabnik_id === req.user.id);
+    if (req.query.prebrano !== undefined) {
+        notifications = notifications.filter((notification) => {
+            return notification.prebrano === (String(req.query.prebrano) === 'true');
+        });
+    }
+
+    return res.json(notifications.map((notification) => ({
+        ...notification,
+        dogodek: enrichEvent(findEvent(notification.dogodek_id))
+    })));
+});
+
+app.put('/api/notifications/:id/read', authenticate, (req, res) => {
+    const notification = db.notifications.find((candidate) => candidate.id === req.params.id);
+    if (!notification) {
+        return sendError(res, 404, 'Obvestilo ne obstaja.');
+    }
+    if (notification.uporabnik_id !== req.user.id) {
+        return sendError(res, 403, 'Obvestilo pripada drugemu uporabniku.');
+    }
+
+    notification.prebrano = true;
+    saveDb();
+    return res.json({ id: notification.id, prebrano: notification.prebrano });
+});
+
+app.delete('/api/notifications/:id', authenticate, (req, res) => {
+    const notification = db.notifications.find((candidate) => candidate.id === req.params.id);
+    if (!notification) {
+        return sendError(res, 404, 'Obvestilo ne obstaja.');
+    }
+    if (notification.uporabnik_id !== req.user.id) {
+        return sendError(res, 403, 'Obvestilo pripada drugemu uporabniku.');
+    }
+
+    db.notifications = db.notifications.filter((candidate) => candidate.id !== notification.id);
+    saveDb();
+    return res.status(204).send();
+});
+
+app.use((req, res) => {
+    sendError(res, 404, 'Pot ne obstaja.');
+});
+
+app.use((error, req, res, next) => {
+    console.error(error);
+    sendError(res, 500, 'Prislo je do napake na strezniku.');
+});
+
+ensureQrCodes().then(() => {
+    app.listen(PORT, () => {
+        console.log(`KajDogaja REST API deluje na http://localhost:${PORT}`);
+    });
 });
