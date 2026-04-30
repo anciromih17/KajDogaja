@@ -1,9 +1,10 @@
-const CACHE_NAME = 'kajdogaja-static-v7';
+const CACHE_NAME = 'kajdogaja-static-v16';
 const STATIC_ASSETS = [
     '/pwa',
+    '/pwa/',
     '/pwa/index.html',
-    '/pwa/styles.css?v=7',
-    '/pwa/app.js?v=7',
+    '/pwa/styles.css?v=16',
+    '/pwa/app.js?v=16',
     '/manifest.webmanifest',
     '/icons/icon-192.svg',
     '/icons/icon-512.svg'
@@ -41,6 +42,30 @@ self.addEventListener('fetch', (event) => {
                     return response;
                 })
                 .catch(() => caches.match(request))
+        );
+        return;
+    }
+
+    if (request.mode === 'navigate' || request.destination === 'document') {
+        event.respondWith(
+            fetch(request).catch(async () => {
+                const directMatch = await caches.match(request);
+                if (directMatch) {
+                    return directMatch;
+                }
+
+                const trailingSlashMatch = await caches.match('/pwa/');
+                if (trailingSlashMatch) {
+                    return trailingSlashMatch;
+                }
+
+                const shellMatch = await caches.match('/pwa/index.html');
+                if (shellMatch) {
+                    return shellMatch;
+                }
+
+                return Response.error();
+            })
         );
         return;
     }

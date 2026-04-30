@@ -82,7 +82,29 @@ button.danger:hover {
     border-radius: 999px;
     padding: 0;
     width: 42px;
+    min-height: 42px;
     border: none;
+}
+
+#micButton {
+    border-radius: 999px;
+    padding: 0;
+    width: 42px;
+    min-height: 42px;
+    border: none;
+    background: #ffffff;
+    color: var(--accent-strong);
+}
+
+#micButton:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+}
+
+#micButton.listening {
+    background: #111827;
+    border-color: #111827;
+    color: #ffffff;
 }
 
 svg {
@@ -181,6 +203,16 @@ h1 {
 h2 {
     margin-bottom: 0;
     font-size: 1.08rem;
+}
+
+.section-title-with-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.section-title-with-icon svg {
+    color: var(--accent-strong);
 }
 
 .status-group {
@@ -395,6 +427,77 @@ textarea {
     align-items: start;
 }
 
+.voice-panel {
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.voice-panel-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.collapse-button {
+    width: 34px;
+    min-height: 34px;
+    padding: 0;
+    border-radius: 999px;
+}
+
+.collapse-button svg {
+    transition: transform 0.15s ease;
+}
+
+.collapse-button[aria-expanded="true"] svg {
+    transform: rotate(180deg);
+}
+
+.voice-grid {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.75fr) minmax(0, 1.25fr);
+    gap: 14px;
+    align-items: start;
+    overflow: hidden;
+    opacity: 1;
+    max-height: 420px;
+    margin-top: 0;
+    transition: max-height 0.3s ease, opacity 0.24s ease;
+}
+
+.voice-grid.collapsed {
+    max-height: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.voice-summary {
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.voice-help {
+    margin-bottom: 12px;
+    color: var(--muted);
+    line-height: 1.5;
+    font-size: 0.92rem;
+}
+
+.voice-transcript {
+    display: block;
+    margin-top: 8px;
+    font-size: 1rem;
+    line-height: 1.45;
+}
+
+.voice-command-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
 .list-panel,
 .form-panel {
     padding: 16px;
@@ -533,6 +636,7 @@ form {
         flex-direction: column;
     }
 
+    .voice-grid,
     .stats-grid,
     .content-grid {
         grid-template-columns: 1fr;

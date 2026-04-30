@@ -14,10 +14,15 @@ const STORE_KEYS = {
 const elements = {
     connectionStatus: document.getElementById('connectionStatus'),
     syncButton: document.getElementById('syncButton'),
+    micButton: document.getElementById('micButton'),
     searchInput: document.getElementById('searchInput'),
     searchButton: document.getElementById('searchButton'),
     categoryFilter: document.getElementById('categoryFilter'),
     cityFilter: document.getElementById('cityFilter'),
+    voicePanelToggle: document.getElementById('voicePanelToggle'),
+    voicePanelBody: document.getElementById('voicePanelBody'),
+    voiceStatus: document.getElementById('voiceStatus'),
+    voiceTranscript: document.getElementById('voiceTranscript'),
     eventsList: document.getElementById('eventsList'),
     eventCount: document.getElementById('eventCount'),
     form: document.getElementById('eventForm'),
@@ -52,7 +57,11 @@ let state = {
     events: [],
     categories: [],
     cities: [],
-    lazyObserver: null
+    lazyObserver: null,
+    isConnected: navigator.onLine,
+    recognition: null,
+    isListening: false,
+    voiceSupported: false
 };
 
 function readStore(key, fallback) {
@@ -68,6 +77,23 @@ function updateStats() {
     elements.totalEventsStat.textContent = String(state.events.length);
     elements.categoryStat.textContent = String(state.categories.length);
     elements.queueStat.textContent = String(readStore(STORE_KEYS.queue, []).length);
+}
+
+function formatDisplayDate(dateValue) {
+    if (!dateValue) {
+        return '';
+    }
+
+    const [year, month, day] = dateValue.split('-').map(Number);
+    if (!year || !month || !day) {
+        return dateValue;
+    }
+
+    return new Intl.DateTimeFormat('sl-SI', {
+        day: 'numeric',
+        month: 'numeric',
+        year: 'numeric'
+    }).format(new Date(year, month - 1, day));
 }
 
 function toast(message, type = 'ok') {
@@ -103,9 +129,14 @@ async function notify(title, body) {
     }
 }
 
+function setConnectionStatus(isConnected) {
+    state.isConnected = isConnected;
+    elements.connectionStatus.textContent = isConnected ? 'Online' : 'Offline';
+    elements.connectionStatus.classList.toggle('offline', !isConnected);
+}
+
 function updateConnectionStatus() {
-    elements.connectionStatus.textContent = navigator.onLine ? 'Online' : 'Offline';
-    elements.connectionStatus.classList.toggle('offline', !navigator.onLine);
+    setConnectionStatus(navigator.onLine);
 }
 
 async function registerServiceWorker() {
@@ -147,14 +178,21 @@ async function getToken() {
 
 async function apiRequest(path, options = {}, retried = false) {
     const token = options.auth === false ? null : await getToken();
-    const response = await fetch(`${API_URL}${path}`, {
-        method: options.method || 'GET',
-        headers: {
-            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-            ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: options.body ? JSON.stringify(options.body) : undefined
-    });
+    let response;
+    try {
+        response = await fetch(`${API_URL}${path}`, {
+            method: options.method || 'GET',
+            headers: {
+                ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+                ...(token ? { Authorization: `Bearer ${token}` } : {})
+            },
+            body: options.body ? JSON.stringify(options.body) : undefined
+        });
+        setConnectionStatus(true);
+    } catch (error) {
+        setConnectionStatus(false);
+        throw error;
+    }
 
     if (!response.ok) {
         if (response.status === 401 && token && !retried) {
@@ -250,9 +288,7 @@ function renderEvents(events) {
     }
 
     for (const event of events) {
-        const dateLabel = event.datum_do && event.datum_do !== event.datum
-            ? `${event.datum} - ${event.datum_do}`
-            : event.datum;
+        const dateLabel = getEventDateLabel(event);
         const card = document.createElement('article');
         card.className = 'event-card';
         card.innerHTML = `
@@ -365,6 +401,337 @@ async function loadProfile() {
         elements.profileName.textContent = 'Profil ni na voljo';
         elements.profileEmail.textContent = error.message;
         elements.profileRole.textContent = 'offline';
+    }
+}
+
+function setVoiceStatus(message, isListening = false) {
+    elements.voiceStatus.textContent = message;
+    elements.micButton.classList.toggle('listening', isListening);
+    elements.micButton.setAttribute('aria-pressed', String(isListening));
+}
+
+function setVoiceTranscript(message) {
+    elements.voiceTranscript.textContent = message || '-';
+}
+
+function simplifyText(value) {
+    return (value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^\w\s-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function speak(message) {
+    if (!('speechSynthesis' in window) || !message) {
+        return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(message);
+    utterance.lang = 'sl-SI';
+    utterance.rate = 1;
+    window.speechSynthesis.speak(utterance);
+}
+
+function getEventDateLabel(event) {
+    return event.datum_do && event.datum_do !== event.datum
+        ? `${formatDisplayDate(event.datum)} do ${formatDisplayDate(event.datum_do)}`
+        : formatDisplayDate(event.datum);
+}
+
+function describeEvent(event) {
+    return `${event.naziv}. ${event.opis}. Datum ${getEventDateLabel(event)} ob ${event.ura}. Lokacija ${event.lokacija}, ${event.mesto?.naziv || ''}.`;
+}
+
+function findByNormalizedName(items, phrase) {
+    const normalizedPhrase = simplifyText(phrase);
+    return items.find((item) => {
+        const normalizedName = simplifyText(item.naziv);
+        return normalizedName.includes(normalizedPhrase) || normalizedPhrase.includes(normalizedName);
+    });
+}
+
+function getRelativeDate(offsetDays) {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + offsetDays);
+    return date.toISOString().slice(0, 10);
+}
+
+async function applySearch(query) {
+    elements.searchInput.value = query;
+    await loadEvents();
+}
+
+async function applyCategoryFilter(name) {
+    const category = findByNormalizedName(state.categories, name);
+    if (!category) {
+        throw new Error(`Kategorije ${name} nisem našel.`);
+    }
+    elements.categoryFilter.value = category.id;
+    await loadEvents();
+    return category;
+}
+
+async function applyCityFilter(name) {
+    const city = findByNormalizedName(state.cities, name);
+    if (!city) {
+        throw new Error(`Mesta ${name} nisem našel.`);
+    }
+    elements.cityFilter.value = city.id;
+    await loadEvents();
+    return city;
+}
+
+function findEventByPhrase(phrase) {
+    const normalizedPhrase = simplifyText(phrase);
+    return state.events.find((event) => {
+        const normalizedName = simplifyText(event.naziv);
+        return normalizedName.includes(normalizedPhrase) || normalizedPhrase.includes(normalizedName);
+    });
+}
+
+function findEventsByDate(dateValue) {
+    return state.events.filter((event) => {
+        const eventStart = event.datum;
+        const eventEnd = event.datum_do || event.datum;
+        return dateValue >= eventStart && dateValue <= eventEnd;
+    });
+}
+
+async function runVoiceCommand(transcript) {
+    const normalized = simplifyText(transcript);
+    setVoiceTranscript(transcript);
+
+    if (!normalized) {
+        speak('Ukaza nisem slišal dovolj jasno.');
+        setVoiceStatus('Ukaza nisem prepoznal.');
+        return;
+    }
+
+    try {
+        if (normalized.startsWith('isci ')) {
+            const query = transcript.slice(transcript.toLowerCase().indexOf(' ') + 1).trim();
+            await applySearch(query);
+            speak(`Iščem ${query}.`);
+            setVoiceStatus(`Izveden ukaz: išči ${query}.`);
+            return;
+        }
+
+        if (normalized === 'pocisti iskanje') {
+            elements.searchInput.value = '';
+            await loadEvents();
+            speak('Iskanje je počiščeno.');
+            setVoiceStatus('Iskanje je počiščeno.');
+            return;
+        }
+
+        if (normalized === 'pocisti kategorije') {
+            elements.categoryFilter.value = '';
+            await loadEvents();
+            speak('Filter kategorije je počiščen.');
+            setVoiceStatus('Filter kategorije je počiščen.');
+            return;
+        }
+
+        if (normalized.startsWith('nastavi naziv ')) {
+            const value = transcript.slice(transcript.toLowerCase().indexOf('naziv') + 'naziv'.length).trim();
+            if (!value) {
+                throw new Error('Naziv ni bil podan.');
+            }
+            elements.eventName.value = value;
+            elements.eventName.focus();
+            speak(`Naziv je nastavljen na ${value}.`);
+            setVoiceStatus(`Naziv obrazca: ${value}.`);
+            return;
+        }
+
+        if (normalized === 'nov dogodek') {
+            resetForm();
+            elements.eventName.focus();
+            speak('Obrazec za nov dogodek je pripravljen.');
+            setVoiceStatus('Obrazec je pripravljen za nov dogodek.');
+            return;
+        }
+
+        if (normalized === 'pocisti obrazec') {
+            resetForm();
+            speak('Obrazec je počiščen.');
+            setVoiceStatus('Obrazec je počiščen.');
+            return;
+        }
+
+        if (normalized === 'shrani dogodek') {
+            elements.form.requestSubmit();
+            speak('Shranjujem dogodek.');
+            setVoiceStatus('Pošiljam obrazec za shranjevanje.');
+            return;
+        }
+
+        if (normalized.startsWith('filtriraj kategorijo ')) {
+            const name = transcript.slice(transcript.toLowerCase().indexOf('kategorijo') + 'kategorijo'.length).trim();
+            const category = await applyCategoryFilter(name);
+            speak(`Filter kategorije je nastavljen na ${category.naziv}.`);
+            setVoiceStatus(`Aktivna kategorija: ${category.naziv}.`);
+            return;
+        }
+
+        if (normalized.startsWith('filtriraj mesto ')) {
+            const name = transcript.slice(transcript.toLowerCase().indexOf('mesto') + 'mesto'.length).trim();
+            const city = await applyCityFilter(name);
+            speak(`Filter mesta je nastavljen na ${city.naziv}.`);
+            setVoiceStatus(`Aktivno mesto: ${city.naziv}.`);
+            return;
+        }
+
+        if (normalized === 'preberi prvi dogodek') {
+            if (!state.events.length) {
+                throw new Error('Trenutno ni dogodkov za branje.');
+            }
+            const firstEvent = state.events[0];
+            speak(describeEvent(firstEvent));
+            setVoiceStatus(`Berem dogodek: ${firstEvent.naziv}.`);
+            return;
+        }
+
+        if (normalized === 'preberi dogodke danes' || normalized === 'preberi dogodek danes') {
+            const todayEvents = findEventsByDate(getRelativeDate(0));
+            if (!todayEvents.length) {
+                throw new Error('Danes ni dogodkov v trenutnem seznamu.');
+            }
+            const event = todayEvents[0];
+            speak(`Danes je na voljo ${todayEvents.length} dogodkov. ${describeEvent(event)}`);
+            setVoiceStatus(`Prebran današnji dogodek: ${event.naziv}.`);
+            return;
+        }
+
+        if (normalized === 'preberi dogodke jutri' || normalized === 'preberi dogodek jutri') {
+            const tomorrowEvents = findEventsByDate(getRelativeDate(1));
+            if (!tomorrowEvents.length) {
+                throw new Error('Jutri ni dogodkov v trenutnem seznamu.');
+            }
+            const event = tomorrowEvents[0];
+            speak(`Jutri je na voljo ${tomorrowEvents.length} dogodkov. ${describeEvent(event)}`);
+            setVoiceStatus(`Prebran jutrišnji dogodek: ${event.naziv}.`);
+            return;
+        }
+
+        if (normalized.startsWith('preberi dogodek ')) {
+            const phrase = transcript.slice(transcript.toLowerCase().indexOf('dogodek') + 'dogodek'.length).trim();
+            const event = findEventByPhrase(phrase);
+            if (!event) {
+                throw new Error(`Dogodka ${phrase} nisem našel.`);
+            }
+            speak(describeEvent(event));
+            setVoiceStatus(`Berem dogodek: ${event.naziv}.`);
+            return;
+        }
+
+        if (normalized === 'sinhroniziraj') {
+            await syncQueue();
+            speak('Sinhronizacija je zagnana.');
+            setVoiceStatus('Sinhronizacija je zagnana.');
+            return;
+        }
+
+        speak('Ukaz ni podprt.');
+        setVoiceStatus('Ukaz ni podprt.');
+    } catch (error) {
+        speak(error.message);
+        setVoiceStatus(error.message);
+    }
+}
+
+function setupVoiceRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const supportsSpeechOutput = 'speechSynthesis' in window;
+    if (!SpeechRecognition || !supportsSpeechOutput) {
+        elements.micButton.disabled = true;
+        state.voiceSupported = false;
+        setVoiceStatus('Brskalnik ne podpira glasovnih ukazov.');
+        setVoiceTranscript('Uporabi Chromium brskalnik za test mikrofona.');
+        return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'sl-SI';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.addEventListener('start', () => {
+        state.isListening = true;
+        setVoiceStatus('Poslušam ...', true);
+    });
+
+    recognition.addEventListener('result', (event) => {
+        const transcript = event.results[0][0].transcript.trim();
+        runVoiceCommand(transcript);
+    });
+
+    recognition.addEventListener('error', (event) => {
+        state.isListening = false;
+        setVoiceStatus(`Napaka mikrofona: ${event.error}.`);
+        if (event.error !== 'no-speech') {
+            speak('Pri uporabi mikrofona je prišlo do napake.');
+        }
+    });
+
+    recognition.addEventListener('end', () => {
+        state.isListening = false;
+        if (!elements.voiceStatus.textContent.includes('Berem') && !elements.voiceStatus.textContent.includes('Izveden') && !elements.voiceStatus.textContent.includes('Aktivn')) {
+            setVoiceStatus('Mikrofon je pripravljen.');
+        } else {
+            elements.micButton.classList.remove('listening');
+            elements.micButton.setAttribute('aria-pressed', 'false');
+        }
+    });
+
+    state.recognition = recognition;
+    state.voiceSupported = true;
+    setVoiceStatus('Mikrofon je pripravljen.');
+}
+
+function toggleVoiceRecognition() {
+    if (!state.voiceSupported || !state.recognition) {
+        setVoiceStatus('Glasovni ukazi niso na voljo.');
+        return;
+    }
+
+    if (state.isListening) {
+        state.recognition.stop();
+        setVoiceStatus('Poslušanje je ustavljeno.');
+        return;
+    }
+
+    setVoiceTranscript('Čakam na glasovni ukaz ...');
+    state.recognition.start();
+}
+
+function toggleVoicePanel() {
+    const shouldOpen = elements.voicePanelBody.classList.contains('collapsed');
+    elements.voicePanelToggle.setAttribute('aria-expanded', String(shouldOpen));
+    elements.voicePanelBody.setAttribute('aria-hidden', String(!shouldOpen));
+
+    if (shouldOpen) {
+        elements.voicePanelBody.classList.remove('collapsed');
+        elements.voicePanelBody.style.maxHeight = `${elements.voicePanelBody.scrollHeight}px`;
+        return;
+    }
+
+    elements.voicePanelBody.style.maxHeight = `${elements.voicePanelBody.scrollHeight}px`;
+    requestAnimationFrame(() => {
+        elements.voicePanelBody.classList.add('collapsed');
+        elements.voicePanelBody.style.maxHeight = '0px';
+    });
+}
+
+function syncVoicePanelHeight() {
+    if (!elements.voicePanelBody.classList.contains('collapsed')) {
+        elements.voicePanelBody.style.maxHeight = `${elements.voicePanelBody.scrollHeight}px`;
     }
 }
 
@@ -527,6 +894,8 @@ async function deliverPushMessages() {
 
 function bindEvents() {
     elements.searchButton.addEventListener('click', loadEvents);
+    elements.micButton.addEventListener('click', toggleVoiceRecognition);
+    elements.voicePanelToggle.addEventListener('click', toggleVoicePanel);
     elements.searchInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
             event.preventDefault();
@@ -587,10 +956,11 @@ function bindEvents() {
     });
 
     window.addEventListener('online', () => {
-        updateConnectionStatus();
+        setConnectionStatus(true);
         syncQueue();
     });
-    window.addEventListener('offline', updateConnectionStatus);
+    window.addEventListener('offline', () => setConnectionStatus(false));
+    window.addEventListener('resize', syncVoicePanelHeight);
 
     document.addEventListener('keydown', (event) => {
         const key = event.key.toLowerCase();
@@ -612,6 +982,7 @@ function bindEvents() {
 
 async function init() {
     updateConnectionStatus();
+    setupVoiceRecognition();
     bindEvents();
     await registerServiceWorker();
     await loadProfile();
@@ -619,6 +990,7 @@ async function init() {
     resetForm();
     await loadEvents();
     await subscribePush();
+    syncVoicePanelHeight();
 }
 
 init().catch((error) => {
