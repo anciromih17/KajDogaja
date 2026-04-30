@@ -17,6 +17,16 @@ const DB_PATH = path.join(DATA_DIR, 'db.json');
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') {
+        return res.status(204).send();
+    }
+    return next();
+});
+
 function now() {
     return new Date().toISOString();
 }
@@ -126,6 +136,8 @@ function seedDb() {
             }
         ],
         oauthRefreshTokens: [],
+        pushSubscriptions: [],
+        pushMessages: [],
         revokedTokens: []
     };
 }
@@ -170,6 +182,16 @@ function normalizeDb() {
 
     if (!Array.isArray(db.revokedTokens)) {
         db.revokedTokens = [];
+        changed = true;
+    }
+
+    if (!Array.isArray(db.pushSubscriptions)) {
+        db.pushSubscriptions = [];
+        changed = true;
+    }
+
+    if (!Array.isArray(db.pushMessages)) {
+        db.pushMessages = [];
         changed = true;
     }
 
@@ -410,6 +432,14 @@ function validateEventPayload(payload, partial = false) {
         return 'Datum mora biti v obliki YYYY-MM-DD.';
     }
 
+    if (payload.datum_do !== undefined && payload.datum_do !== '' && !isValidDate(payload.datum_do)) {
+        return 'Datum do mora biti v obliki YYYY-MM-DD.';
+    }
+
+    if (payload.datum && payload.datum_do && payload.datum_do < payload.datum) {
+        return 'Datum do ne sme biti pred datumom zacetka.';
+    }
+
     if (payload.ura !== undefined && !isValidTime(payload.ura)) {
         return 'Ura mora biti v obliki HH:MM.';
     }
@@ -460,6 +490,19 @@ function createNotification(userId, eventId, tip, vsebina) {
     });
 }
 
+function queuePushMessage(title, body, data = {}) {
+    const message = {
+        id: id('push'),
+        title,
+        body,
+        data,
+        ustvarjeno: now(),
+        delivered: false
+    };
+    db.pushMessages.push(message);
+    return message;
+}
+
 app.get('/', (req, res) => {
     res.type('html').send(`
 <!DOCTYPE html>
@@ -483,6 +526,7 @@ app.get('/', (req, res) => {
     <main>
         <h1>KajDogaja</h1>
         <div class="grid">
+            <a href="/pwa">KajDogaja PWA</a>
             <a href="/api">/api</a>
             <a href="/funkcionalnosti-odjemalca/">Funkcionalnosti odjemalca</a>
             <a href="/funkcionalnosti-streznika/">Funkcionalnosti streznika</a>
@@ -494,6 +538,21 @@ app.get('/', (req, res) => {
     </main>
 </body>
 </html>`);
+});
+
+app.use('/pwa', express.static(path.join(__dirname, 'public')));
+app.use('/icons', express.static(path.join(__dirname, 'public', 'icons')));
+
+app.get('/pwa/?', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get('/sw.js', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'sw.js'));
+});
+
+app.get('/manifest.webmanifest', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'manifest.webmanifest'));
 });
 
 app.get('/funkcionalnosti-odjemalca/?', (req, res) => {
@@ -547,9 +606,14 @@ app.get('/api', (req, res) => {
             'GET /api/notifications',
             'PUT /api/notifications/:id/read',
             'DELETE /api/notifications/:id',
+            'POST /api/push/subscribe',
+            'POST /api/push/send',
+            'GET /api/push/messages',
             'GET /api/events/:id/stats',
             'GET /api/categories',
-            'GET /api/cities'
+            'POST /api/categories',
+            'GET /api/cities',
+            'POST /api/cities'
         ]
     });
 });
@@ -614,8 +678,45 @@ app.get('/api/categories', (req, res) => {
     res.json(db.categories);
 });
 
+app.post('/api/categories', authenticate, requireScope('write'), requireRole('organizator'), (req, res) => {
+    const naziv = String(req.body.naziv || '').trim();
+    if (!naziv) {
+        return sendError(res, 400, 'Naziv kategorije je obvezen.');
+    }
+
+    const exists = db.categories.some((category) => category.naziv.toLowerCase() === naziv.toLowerCase());
+    if (exists) {
+        return sendError(res, 409, 'Kategorija ze obstaja.');
+    }
+
+    const category = { id: id('cat'), naziv };
+    db.categories.push(category);
+    saveDb();
+    return res.status(201).json(category);
+});
+
 app.get('/api/cities', (req, res) => {
     res.json(db.cities);
+});
+
+app.post('/api/cities', authenticate, requireScope('write'), requireRole('organizator'), (req, res) => {
+    const naziv = String(req.body.naziv || '').trim();
+    const koordinate_lat = Number(req.body.koordinate_lat);
+    const koordinate_lng = Number(req.body.koordinate_lng);
+
+    if (!naziv || Number.isNaN(koordinate_lat) || Number.isNaN(koordinate_lng)) {
+        return sendError(res, 400, 'Naziv in koordinate mesta so obvezni.');
+    }
+
+    const exists = db.cities.some((city) => city.naziv.toLowerCase() === naziv.toLowerCase());
+    if (exists) {
+        return sendError(res, 409, 'Mesto ze obstaja.');
+    }
+
+    const city = { id: id('city'), naziv, koordinate_lat, koordinate_lng };
+    db.cities.push(city);
+    saveDb();
+    return res.status(201).json(city);
 });
 
 app.post('/api/oauth/token', async (req, res) => {
@@ -742,9 +843,17 @@ app.get('/api/events', (req, res) => {
     if (date) {
         const parts = String(date).split(',');
         if (parts.length === 2) {
-            events = events.filter((event) => event.datum >= parts[0] && event.datum <= parts[1]);
+            events = events.filter((event) => {
+                const start = event.datum;
+                const end = event.datum_do || event.datum;
+                return start <= parts[1] && end >= parts[0];
+            });
         } else {
-            events = events.filter((event) => event.datum === date);
+            events = events.filter((event) => {
+                const start = event.datum;
+                const end = event.datum_do || event.datum;
+                return start <= date && end >= date;
+            });
         }
     }
 
@@ -874,6 +983,7 @@ app.post('/api/events', authenticate, requireScope('write', 'events'), requireRo
         naziv: req.body.naziv,
         opis: req.body.opis,
         datum: req.body.datum,
+        datum_do: req.body.datum_do || req.body.datum,
         ura: req.body.ura,
         lokacija: req.body.lokacija,
         koordinate_lat: Number(req.body.koordinate_lat),
@@ -889,6 +999,7 @@ app.post('/api/events', authenticate, requireScope('write', 'events'), requireRo
 
     event.qr_koda_url = await QRCode.toDataURL(`http://localhost:${PORT}/api/events/${event.id}`);
     db.events.push(event);
+    queuePushMessage('Nov dogodek', `Dodana je prireditev "${event.naziv}".`, { eventId: event.id, url: `/api/events/${event.id}` });
     saveDb();
     return res.status(201).json(enrichEvent(event));
 });
@@ -903,6 +1014,7 @@ app.put('/api/events/:id', authenticate, requireScope('write', 'events'), requir
         'naziv',
         'opis',
         'datum',
+        'datum_do',
         'ura',
         'lokacija',
         'koordinate_lat',
@@ -931,6 +1043,7 @@ app.put('/api/events/:id', authenticate, requireScope('write', 'events'), requir
         );
     }
 
+    queuePushMessage('Dogodek posodobljen', `Dogodek "${req.event.naziv}" je bil posodobljen.`, { eventId: req.event.id, url: `/api/events/${req.event.id}` });
     saveDb();
     return res.json(enrichEvent(req.event));
 });
@@ -944,6 +1057,7 @@ app.delete('/api/events/:id', authenticate, requireScope('write', 'events'), req
         createNotification(userId, req.event.id, 'odpoved', `Dogodek "${req.event.naziv}" je bil odpovedan.`);
     }
 
+    queuePushMessage('Dogodek izbrisan', `Dogodek "${req.event.naziv}" je bil izbrisan.`, { eventId: req.event.id });
     saveDb();
     return res.status(204).send();
 });
@@ -1004,6 +1118,48 @@ app.delete('/api/notifications/:id', authenticate, requireScope('notifications')
     db.notifications = db.notifications.filter((candidate) => candidate.id !== notification.id);
     saveDb();
     return res.status(204).send();
+});
+
+app.post('/api/push/subscribe', authenticate, (req, res) => {
+    const subscription = {
+        id: id('sub'),
+        user_id: req.user.id,
+        endpoint: req.body.endpoint || `local-${req.user.id}`,
+        keys: req.body.keys || {},
+        ustvarjeno: now()
+    };
+
+    const existingIndex = db.pushSubscriptions.findIndex((item) => item.user_id === req.user.id && item.endpoint === subscription.endpoint);
+    if (existingIndex >= 0) {
+        db.pushSubscriptions[existingIndex] = subscription;
+    } else {
+        db.pushSubscriptions.push(subscription);
+    }
+
+    saveDb();
+    return res.status(201).json({ sporocilo: 'Naprava je narocena na potisna sporocila.', subscription });
+});
+
+app.post('/api/push/send', authenticate, requireScope('notifications'), (req, res) => {
+    const title = req.body.title || 'KajDogaja';
+    const body = req.body.body || 'Novo potisno sporocilo.';
+    const message = queuePushMessage(title, body, {
+        sender_id: req.user.id,
+        url: req.body.url || '/pwa'
+    });
+
+    saveDb();
+    return res.status(201).json({ sporocilo: 'Push sporocilo je pripravljeno.', message });
+});
+
+app.get('/api/push/messages', authenticate, requireScope('notifications'), (req, res) => {
+    const pending = db.pushMessages.filter((message) => !message.delivered);
+    for (const message of pending) {
+        message.delivered = true;
+        message.delivered_at = now();
+    }
+    saveDb();
+    return res.json(pending);
 });
 
 app.use((req, res) => {

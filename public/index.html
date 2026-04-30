@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0f766e">
+    <title>KajDogaja</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/pwa/styles.css?v=16">
+</head>
+<body>
+    <header class="app-header">
+        <div class="brand-area">
+            <div class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                    <path d="M4 7.5a2 2 0 0 1 2-2h5.4a1 1 0 0 1 1 1 1.1 1.1 0 0 0 2.2 0 1 1 0 0 1 1-1H18a2 2 0 0 1 2 2v2.1a2.4 2.4 0 0 0 0 4.8v2.1a2 2 0 0 1-2 2h-2.4a1 1 0 0 1-1-1 1.1 1.1 0 0 0-2.2 0 1 1 0 0 1-1 1H6a2 2 0 0 1-2-2v-2.1a2.4 2.4 0 0 0 0-4.8Z"/>
+                    <path d="M13.5 8.4v1.3M13.5 11.4v1.3M13.5 14.4v1.3"/>
+                </svg>
+            </div>
+            <div>
+                <h1>KajDogaja</h1>
+            </div>
+        </div>
+        <div class="status-group">
+            <span id="connectionStatus" class="status-pill">Online</span>
+            <button id="syncButton" type="button" class="icon-button" title="Sinhroniziraj vsebino">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.1 6.7M5.8 15A7 7 0 0 0 17.9 17.3"/></svg>
+            </button>
+            <button id="micButton" type="button" class="icon-button" aria-pressed="false" title="Glasovni ukazi">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a3 3 0 0 1 3 3v4a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3Z"/><path d="M19 10a7 7 0 0 1-14 0M12 17v3M8 20h8"/></svg>
+            </button>
+            <div class="profile-menu">
+                <button id="profileButton" type="button" class="profile-button" aria-expanded="false" aria-controls="profileDropdown" title="Profil">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M20 21a8 8 0 0 0-16 0"/>
+                        <circle cx="12" cy="8" r="4"/>
+                    </svg>
+                </button>
+                <div id="profileDropdown" class="profile-dropdown" hidden>
+                    <strong id="profileName">Prijavljen uporabnik</strong>
+                    <span id="profileEmail">Nalagam profil ...</span>
+                    <span id="profileRole" class="role-pill">-</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="layout">
+        <section class="stats-grid" aria-label="Povzetek">
+            <article class="stat-card">
+                <span class="stat-icon">
+                    <svg viewBox="0 0 24 24"><path d="M7 3v3M17 3v3M4 8h16M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg>
+                </span>
+                <div>
+                    <p>Dogodki</p>
+                    <strong id="totalEventsStat">0</strong>
+                </div>
+            </article>
+            <article class="stat-card">
+                <span class="stat-icon">
+                    <svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+                </span>
+                <div>
+                    <p>Kategorije</p>
+                    <strong id="categoryStat">0</strong>
+                </div>
+            </article>
+            <article class="stat-card">
+                <span class="stat-icon">
+                    <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+                </span>
+                <div>
+                    <p>Čaka sinhronizacijo</p>
+                    <strong id="queueStat">0</strong>
+                </div>
+            </article>
+        </section>
+
+        <section class="panel tools-panel">
+            <div class="toolbar">
+                <label class="search-wrap" for="searchInput">
+                    <span>Iskanje</span>
+                    <input id="searchInput" type="search" placeholder="Naziv, opis, mesto ...">
+                </label>
+                <button id="searchButton" type="button" class="icon-button">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.3-4.3M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4Z"/></svg>
+                    Išči
+                </button>
+            </div>
+            <div class="filters">
+                <label>
+                    Kategorija
+                    <select id="categoryFilter">
+                        <option value="">Vse kategorije</option>
+                    </select>
+                </label>
+                <label>
+                    Mesto
+                    <select id="cityFilter">
+                        <option value="">Vsa mesta</option>
+                    </select>
+                </label>
+            </div>
+            <p class="hint">Bližnjice: Ctrl+K iskanje, Alt+N nov dogodek, Ctrl+S shrani obrazec.</p>
+        </section>
+
+        <section class="panel voice-panel" aria-label="Glasovno upravljanje">
+            <div class="section-head">
+                <h2 class="section-title-with-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a3 3 0 0 1 3 3v4a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3Z"/><path d="M19 10a7 7 0 0 1-14 0M12 17v3M8 20h8"/></svg>
+                    Glasovni ukazi
+                </h2>
+                <div class="voice-panel-head">
+                    <span id="voiceStatus" class="muted">Mikrofon je pripravljen.</span>
+                    <button id="voicePanelToggle" type="button" class="ghost collapse-button" aria-expanded="false" aria-controls="voicePanelBody" title="Prikaži ali skrij glasovne ukaze">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div id="voicePanelBody" class="voice-grid collapsed" aria-hidden="true">
+                <div class="voice-summary">
+                    <p class="voice-help">Kliknite ikono mikrofona v desnem zgornjem kotu in nato povejte ukaz, ki ga želite izvesti.</p>
+                </br>
+                    <strong id="voiceTranscript" class="voice-transcript">-</strong>
+                </div>
+                <div>
+                    <p class="muted">Primeri ukazov</p>
+                    <div class="voice-command-list">
+                        <span class="chip">išči koncert</span>
+                        <span class="chip">počisti iskanje</span>
+                        <span class="chip">počisti kategorije</span>
+                        <span class="chip">nov dogodek</span>
+                        <span class="chip">nastavi naziv Poletni koncert</span>
+                        <span class="chip">shrani dogodek</span>
+                        <span class="chip">filtriraj mesto Maribor</span>
+                        <span class="chip">filtriraj kategorijo glasba</span>
+                        <span class="chip">preberi prvi dogodek</span>
+                        <span class="chip">preberi dogodek večerni koncert</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content-grid">
+            <section class="panel list-panel">
+                <div class="section-head">
+                    <h2>Dogodki</h2>
+                    <span id="eventCount" class="muted">0</span>
+                </div>
+                <div id="eventsList" class="events-list"></div>
+            </section>
+
+            <section class="panel form-panel">
+                <div class="section-head">
+                    <h2 id="formTitle">Nov dogodek</h2>
+                    <button id="resetFormButton" type="button" class="ghost icon-button">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
+                        Počisti
+                    </button>
+                </div>
+                <form id="eventForm">
+                    <input id="eventId" type="hidden">
+                    <label>
+                        Naziv
+                        <input id="eventName" required maxlength="90">
+                    </label>
+                    <label>
+                        Opis
+                        <textarea id="eventDescription" required rows="4"></textarea>
+                    </label>
+                    <div class="two-col">
+                        <label>
+                            Datum od
+                            <input id="eventDate" type="date" required>
+                        </label>
+                        <label>
+                            Datum do
+                            <input id="eventDateTo" type="date">
+                        </label>
+                    </div>
+                    <div class="two-col">
+                        <label>
+                            Ura
+                            <input id="eventTime" type="time" required>
+                        </label>
+                        <label>
+                            Kapaciteta
+                            <input id="eventCapacity" type="number" min="1" required>
+                        </label>
+                    </div>
+                    <label>
+                        Lokacija
+                        <input id="eventLocation" required>
+                    </label>
+                    <div class="two-col">
+                        <div class="field-with-action">
+                            <label>
+                                Kategorija
+                                <select id="eventCategory" required></select>
+                            </label>
+                            <button id="addCategoryButton" type="button" class="ghost compact-button">+ Kategorija</button>
+                        </div>
+                        <div class="field-with-action">
+                            <label>
+                                Mesto
+                                <select id="eventCity" required></select>
+                            </label>
+                            <button id="addCityButton" type="button" class="ghost compact-button">+ Mesto</button>
+                        </div>
+                    </div>
+                    <div class="two-col">
+                        <label>
+                            Lat
+                            <input id="eventLat" type="number" step="0.0001" required>
+                        </label>
+                        <label>
+                            Lng
+                            <input id="eventLng" type="number" step="0.0001" required>
+                        </label>
+                    </div>
+                    <button id="saveButton" type="submit" class="icon-button">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h11l3 3v11H5Z"/><path d="M8 5v6h8M8 19v-5h8v5"/></svg>
+                        Shrani dogodek
+                    </button>
+                </form>
+            </section>
+        </section>
+    </main>
+
+    <div id="toastHost" class="toast-host" aria-live="polite"></div>
+    <script src="/pwa/app.js?v=16" defer></script>
+</body>
+</html>
