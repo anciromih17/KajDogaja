@@ -47,9 +47,21 @@ const elements = {
     queueStat: document.getElementById('queueStat'),
     profileButton: document.getElementById('profileButton'),
     profileDropdown: document.getElementById('profileDropdown'),
+    profileAvatar: document.getElementById('profileAvatar'),
     profileName: document.getElementById('profileName'),
     profileEmail: document.getElementById('profileEmail'),
     profileRole: document.getElementById('profileRole'),
+    profileSince: document.getElementById('profileSince'),
+    editProfileButton: document.getElementById('editProfileButton'),
+    profileEditOverlay: document.getElementById('profileEditOverlay'),
+    profileEditForm: document.getElementById('profileEditForm'),
+    editName: document.getElementById('editName'),
+    editEmail: document.getElementById('editEmail'),
+    editPasswordNew: document.getElementById('editPasswordNew'),
+    editPasswordCurrent: document.getElementById('editPasswordCurrent'),
+    profileEditError: document.getElementById('profileEditError'),
+    myRegistrationsList: document.getElementById('myRegistrationsList'),
+    myRegistrationsCount: document.getElementById('myRegistrationsCount'),
     toastHost: document.getElementById('toastHost')
 };
 
@@ -61,7 +73,10 @@ let state = {
     isConnected: navigator.onLine,
     recognition: null,
     isListening: false,
-    voiceSupported: false
+    voiceSupported: false,
+    pendingRegister: null,
+    currentUserId: null,
+    currentUserRole: null
 };
 
 function readStore(key, fallback) {
@@ -148,32 +163,7 @@ async function registerServiceWorker() {
 }
 
 async function getToken() {
-    const saved = readStore(STORE_KEYS.token, null);
-    if (saved && new Date(saved.expires_at).getTime() - Date.now() > 30000) {
-        return saved.access_token;
-    }
-
-    const response = await fetch(`${API_URL}/oauth/token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            grant_type: 'password',
-            client_id: CLIENT.client_id,
-            client_secret: CLIENT.client_secret,
-            username: 'organizator@kajdogaja.si',
-            password: 'organizator123',
-            scope: 'read write events registrations notifications'
-        })
-    });
-
-    if (!response.ok) {
-        throw new Error('OAuth prijava ni uspela.');
-    }
-
-    const token = await response.json();
-    token.expires_at = new Date(Date.now() + token.expires_in * 1000).toISOString();
-    writeStore(STORE_KEYS.token, token);
-    return token.access_token;
+    return Auth.getToken();
 }
 
 async function apiRequest(path, options = {}, retried = false) {
@@ -279,6 +269,10 @@ async function loadEvents() {
 }
 
 function renderEvents(events) {
+    if (state.currentUserRole === 'organizator' && state.currentUserId) {
+        events = events.filter(e => e.organizator_id === state.currentUserId);
+    }
+
     elements.eventCount.textContent = `${events.length} zadetkov`;
     elements.eventsList.innerHTML = '';
 
@@ -305,6 +299,9 @@ function renderEvents(events) {
                 <div class="event-actions">
                     <button type="button" data-action="edit" data-id="${event.id}">Uredi</button>
                     <button type="button" class="danger" data-action="delete" data-id="${event.id}">Izbriši</button>
+                </div>
+                <div class="event-register">
+                    <button type="button" class="register-btn" data-action="register" data-id="${event.id}">Prijavi se</button>
                 </div>
             </div>
         `;
@@ -390,17 +387,214 @@ function enqueueOperation(operation) {
     updateStats();
 }
 
+function applyProfile(profile) {
+    const name = profile.uporabnisko_ime || profile.email || 'Prijavljen uporabnik';
+    elements.profileAvatar.textContent = name.charAt(0).toUpperCase();
+    elements.profileName.textContent = name;
+    elements.profileEmail.textContent = profile.email || '-';
+    elements.profileRole.textContent = profile.vloga === 'organizator' ? 'Organizator' : 'Uporabnik';
+    elements.profileRole.className = 'role-pill' + (profile.vloga === 'organizator' ? ' organizator' : '');
+    if (profile.ustvarjen) {
+        const d = new Date(profile.ustvarjen);
+        elements.profileSince.textContent = 'Član od ' + d.toLocaleDateString('sl-SI', { year: 'numeric', month: 'long', day: 'numeric' });
+    }
+    document.body.dataset.role = profile.vloga || 'uporabnik';
+    state.currentUserId = profile.id;
+    state.currentUserRole = profile.vloga || 'uporabnik';
+    const isOrg = state.currentUserRole === 'organizator';
+    const tabLabel = document.getElementById('prijaveTabLabel');
+    if (tabLabel) tabLabel.textContent = isOrg ? 'Statistike prijav' : 'Moje prijave';
+    const panelTitle = document.getElementById('prijaveTabTitle');
+    if (panelTitle) panelTitle.textContent = isOrg ? 'Statistike prijav' : 'Moje prijave';
+}
+
 async function loadProfile() {
+    const cached = Auth.getStoredUser();
+    if (cached) applyProfile(cached);
+
     try {
         const profile = await apiRequest('/me');
-        const name = profile.ime || profile.email || 'Prijavljen uporabnik';
-        elements.profileName.textContent = name;
-        elements.profileEmail.textContent = profile.email || '-';
-        elements.profileRole.textContent = profile.vloga || '-';
+        applyProfile(profile);
     } catch (error) {
-        elements.profileName.textContent = 'Profil ni na voljo';
-        elements.profileEmail.textContent = error.message;
-        elements.profileRole.textContent = 'offline';
+        if (!cached) {
+            elements.profileName.textContent = 'Profil ni na voljo';
+            elements.profileEmail.textContent = '-';
+            elements.profileRole.textContent = 'offline';
+        }
+    }
+}
+
+function openProfileEdit() {
+    const user = Auth.getStoredUser() || {};
+    elements.editName.value = user.uporabnisko_ime || '';
+    elements.editEmail.value = user.email || '';
+    elements.editPasswordNew.value = '';
+    elements.editPasswordCurrent.value = '';
+    elements.profileEditError.textContent = '';
+    elements.profileDropdown.hidden = true;
+    elements.profileButton.setAttribute('aria-expanded', 'false');
+    elements.profileEditOverlay.hidden = false;
+}
+
+function closeProfileEdit() {
+    elements.profileEditOverlay.hidden = true;
+}
+
+async function loadOrganizerStats() {
+    elements.myRegistrationsList.innerHTML = '<p class="muted">Nalagam statistike ...</p>';
+
+    const myEvents = state.events.filter(e => e.organizator_id === state.currentUserId);
+
+    if (!myEvents.length) {
+        elements.myRegistrationsList.innerHTML = '<p class="muted">Nimate še nobenih dogodkov.</p>';
+        elements.myRegistrationsCount.hidden = true;
+        return;
+    }
+
+    const statsResults = await Promise.allSettled(
+        myEvents.map(e => apiRequest(`/events/${e.id}/stats`))
+    );
+
+    const totalPrijav = statsResults.reduce((sum, r) => sum + (r.status === 'fulfilled' ? (r.value?.skupaj_prijav ?? 0) : 0), 0);
+    elements.myRegistrationsCount.textContent = totalPrijav;
+    elements.myRegistrationsCount.hidden = totalPrijav === 0;
+
+    elements.myRegistrationsList.innerHTML = myEvents.map((event, i) => {
+        const stats = statsResults[i].status === 'fulfilled' ? statsResults[i].value : null;
+        const prijav = stats?.skupaj_prijav ?? event.st_prijav ?? 0;
+        const kapaciteta = stats?.kapaciteta ?? event.kapaciteta;
+        const pct = stats?.zasedenost_odstotek ?? (kapaciteta ? Math.round((prijav / kapaciteta) * 100) : null);
+        const prosta = stats?.prostih_mest ?? (kapaciteta ? Math.max(kapaciteta - prijav, 0) : null);
+        const barColor = pct >= 90 ? 'var(--danger)' : pct >= 70 ? 'var(--gold)' : 'var(--accent)';
+        const dateLabel = getEventDateLabel(event);
+
+        return `<div class="stat-event-card">
+            <div class="stat-event-info">
+                <strong>${event.naziv}</strong>
+                <span>${dateLabel} ob ${event.ura} · ${event.lokacija}</span>
+            </div>
+            <div class="stat-event-numbers">
+                <div class="stat-event-bar-wrap">
+                    <div class="stat-event-bar" style="width:${pct ?? 0}%;background:${barColor}"></div>
+                </div>
+                <div class="stat-event-row">
+                    <span><strong>${prijav}</strong> / ${kapaciteta ?? '∞'} prijav</span>
+                    ${pct !== null ? `<span class="stat-event-pct">${pct}%</span>` : ''}
+                </div>
+                ${prosta !== null ? `<span class="stat-muted">${prosta} prostih mest</span>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function loadMyRegistrations() {
+    if (state.currentUserRole === 'organizator') {
+        return loadOrganizerStats();
+    }
+
+    try {
+        const registrations = await apiRequest('/me/registrations');
+        elements.myRegistrationsCount.textContent = registrations.length;
+
+        if (registrations.length === 0) {
+            elements.myRegistrationsList.innerHTML = '<p class="muted">Nisi prijavljen na noben dogodek.</p>';
+            return;
+        }
+
+        elements.myRegistrationsList.innerHTML = registrations.map(reg => {
+            const e = reg.dogodek;
+            const date = e.datum_od ? new Date(e.datum_od).toLocaleDateString('sl-SI') : '-';
+            return `<div class="registration-card">
+                <div class="registration-info">
+                    <strong>${e.naziv}</strong>
+                    <span>${date} · ${e.mesto?.naziv || '-'} · ${e.kategorija?.naziv || '-'}</span>
+                </div>
+                <button class="ghost icon-button" data-unregister="${e.id}" title="Odjavi se">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                    Odjavi se
+                </button>
+            </div>`;
+        }).join('');
+    } catch {
+        elements.myRegistrationsList.innerHTML = '<p class="muted">Napaka pri nalaganju prijav.</p>';
+    }
+}
+
+async function loadNotifications() {
+    const list = document.getElementById('notificationsList');
+    const countEl = document.getElementById('notificationsCount');
+    try {
+        const notifications = await apiRequest('/notifications');
+        const unread = notifications.filter(n => !n.prebrano).length;
+        countEl.textContent = unread;
+        countEl.hidden = unread === 0;
+
+        if (notifications.length === 0) {
+            list.innerHTML = '<p class="muted">Nimaš obvestil.</p>';
+            return;
+        }
+
+        list.innerHTML = notifications.map(n => `
+            <div class="notification-card${n.prebrano ? '' : ' unread'}" data-id="${n.id}">
+                <div class="notification-info">
+                    <strong>${n.naslov || 'Obvestilo'}</strong>
+                    <span>${n.sporocilo || ''}</span>
+                    <span class="notification-time">${new Date(n.ustvarjeno).toLocaleString('sl-SI')}</span>
+                </div>
+                <div class="notification-actions">
+                    ${!n.prebrano ? `<button class="ghost compact-button" data-read="${n.id}" title="Označi kot prebrano">
+                        <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2"><path d="M20 6 9 17l-5-5"/></svg>
+                    </button>` : ''}
+                    <button class="ghost compact-button" data-delete-notif="${n.id}" title="Izbriši" style="color:var(--danger)">
+                        <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                    </button>
+                </div>
+            </div>`).join('');
+    } catch {
+        list.innerHTML = '<p class="muted">Napaka pri nalaganju obvestil.</p>';
+    }
+}
+
+function showRegisterConfirm(eventId, btn) {
+    const event = state.events.find(e => e.id === eventId);
+    if (!event) return;
+
+    const dateLabel = getEventDateLabel(event);
+    document.getElementById('registerConfirmDetails').innerHTML = `
+        <strong>${event.naziv}</strong>
+        <span>${dateLabel} ob ${event.ura}</span>
+        <span>${event.lokacija} · ${event.mesto?.naziv || ''} · ${event.kategorija?.naziv || ''}</span>
+    `;
+    state.pendingRegister = { eventId, btn };
+    document.getElementById('registerConfirmOverlay').hidden = false;
+}
+
+async function registerForEvent(eventId, btn) {
+    const prev = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '...';
+    try {
+        await apiRequest(`/events/${eventId}/registrations`, { method: 'POST' });
+        notify('Prijava uspešna', 'Uspešno si se prijavil na dogodek.');
+        btn.textContent = 'Prijavljen ✓';
+        btn.classList.add('registered');
+        await loadMyRegistrations();
+        await loadEvents();
+    } catch (err) {
+        notify('Napaka', err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = prev;
+    }
+}
+
+async function unregisterFromEvent(eventId) {
+    try {
+        await apiRequest(`/events/${eventId}/registrations`, { method: 'DELETE' });
+        notify('Odjava uspešna', 'Uspešno si se odjavil od dogodka.');
+        await loadMyRegistrations();
+        await loadEvents();
+    } catch (error) {
+        notify('Napaka', error.message, 'error');
     }
 }
 
@@ -888,7 +1082,6 @@ async function deliverPushMessages() {
             }
         }
     } catch (error) {
-        // Push messages are optional for the main workflow.
     }
 }
 
@@ -923,6 +1116,83 @@ function bindEvents() {
         }
     });
 
+    document.querySelectorAll('.nav-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.dataset.tab;
+            document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.querySelectorAll('.tab-content').forEach(c => { c.hidden = true; });
+            const id = 'tab' + tab.charAt(0).toUpperCase() + tab.slice(1);
+            document.getElementById(id).hidden = false;
+            if (tab === 'prijave') loadMyRegistrations();
+            if (tab === 'obvestila') loadNotifications();
+        });
+    });
+
+    elements.editProfileButton.addEventListener('click', openProfileEdit);
+    document.getElementById('closeProfileEdit').addEventListener('click', closeProfileEdit);
+    document.getElementById('cancelProfileEdit').addEventListener('click', closeProfileEdit);
+
+    elements.profileEditOverlay.addEventListener('click', (e) => {
+        if (e.target === elements.profileEditOverlay) closeProfileEdit();
+    });
+
+    elements.profileEditForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = {};
+        const newName = elements.editName.value.trim();
+        const newEmail = elements.editEmail.value.trim();
+        const newPass = elements.editPasswordNew.value;
+        const curPass = elements.editPasswordCurrent.value;
+
+        if (newName) body.uporabnisko_ime = newName;
+        if (newEmail) body.email = newEmail;
+        if (newPass) { body.geslo_novo = newPass; body.geslo_trenutno = curPass; }
+
+        if (!Object.keys(body).length) { closeProfileEdit(); return; }
+
+        const btn = document.getElementById('saveProfileEdit');
+        elements.profileEditError.textContent = '';
+        btn.disabled = true;
+
+        try {
+            const updated = await apiRequest('/me', { method: 'PUT', body });
+            localStorage.setItem('kajdogaja_auth_user', JSON.stringify(updated));
+            applyProfile(updated);
+            closeProfileEdit();
+            notify('Profil posodobljen', 'Podatki so bili uspešno shranjeni.');
+        } catch (err) {
+            elements.profileEditError.textContent = err.message;
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    elements.myRegistrationsList.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-unregister]');
+        if (btn) await unregisterFromEvent(btn.dataset.unregister);
+    });
+
+    document.getElementById('notificationsList').addEventListener('click', async (e) => {
+        const readBtn = e.target.closest('[data-read]');
+        if (readBtn) {
+            await apiRequest(`/notifications/${readBtn.dataset.read}/read`, { method: 'PUT' }).catch(() => { });
+            await loadNotifications();
+            return;
+        }
+        const delBtn = e.target.closest('[data-delete-notif]');
+        if (delBtn) {
+            await apiRequest(`/notifications/${delBtn.dataset.deleteNotif}`, { method: 'DELETE' }).catch(() => { });
+            await loadNotifications();
+        }
+    });
+
+    document.getElementById('markAllReadButton').addEventListener('click', async () => {
+        const items = document.querySelectorAll('[data-read]');
+        await Promise.all([...items].map(b => apiRequest(`/notifications/${b.dataset.read}/read`, { method: 'PUT' }).catch(() => { })));
+        await loadNotifications();
+    });
+
     elements.eventCity.addEventListener('change', () => {
         if (elements.eventCity.value === '__new_city') {
             addCityFromPrompt();
@@ -953,6 +1223,26 @@ function bindEvents() {
         if (button.dataset.action === 'delete') {
             deleteEvent(button.dataset.id);
         }
+        if (button.dataset.action === 'register') {
+            showRegisterConfirm(button.dataset.id, button);
+        }
+    });
+
+    const closeRegisterConfirm = () => {
+        document.getElementById('registerConfirmOverlay').hidden = true;
+        state.pendingRegister = null;
+    };
+
+    document.getElementById('closeRegisterConfirm').addEventListener('click', closeRegisterConfirm);
+    document.getElementById('cancelRegisterConfirm').addEventListener('click', closeRegisterConfirm);
+    document.getElementById('registerConfirmOverlay').addEventListener('click', (e) => {
+        if (e.target === document.getElementById('registerConfirmOverlay')) closeRegisterConfirm();
+    });
+
+    document.getElementById('confirmRegisterBtn').addEventListener('click', async () => {
+        const pending = state.pendingRegister;
+        closeRegisterConfirm();
+        if (pending) await registerForEvent(pending.eventId, pending.btn);
     });
 
     window.addEventListener('online', () => {
@@ -980,7 +1270,7 @@ function bindEvents() {
     });
 }
 
-async function init() {
+async function initApp() {
     updateConnectionStatus();
     setupVoiceRecognition();
     bindEvents();
@@ -989,8 +1279,15 @@ async function init() {
     await loadReferenceData();
     resetForm();
     await loadEvents();
+    await loadMyRegistrations();
+    await loadNotifications();
     await subscribePush();
     syncVoicePanelHeight();
+}
+
+async function init() {
+    Auth.bindAuthEvents();
+    await Auth.checkAuth(initApp);
 }
 
 init().catch((error) => {
