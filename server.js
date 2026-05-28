@@ -1066,6 +1066,29 @@ app.get('/api/me', authenticate, requireScope('read'), (req, res) => {
     return res.json(publicUser(req.user));
 });
 
+app.put('/api/me', authenticate, requireScope('read'), async (req, res) => {
+    const { uporabnisko_ime, email, geslo_novo, geslo_trenutno } = req.body;
+
+    if (email && email.toLowerCase() !== req.user.email.toLowerCase()) {
+        if (db.users.some((u) => u.id !== req.user.id && u.email.toLowerCase() === email.toLowerCase())) {
+            return sendError(res, 409, 'Email je že zaseden.');
+        }
+    }
+
+    if (geslo_novo) {
+        if (!geslo_trenutno) return sendError(res, 400, 'Za spremembo gesla je potrebno trenutno geslo.');
+        const ok = await bcrypt.compare(String(geslo_trenutno), req.user.geslo_hash);
+        if (!ok) return sendError(res, 401, 'Trenutno geslo ni pravilno.');
+        req.user.geslo_hash = await bcrypt.hash(geslo_novo, 10);
+    }
+
+    if (uporabnisko_ime) req.user.uporabnisko_ime = uporabnisko_ime;
+    if (email) req.user.email = email;
+
+    saveDb();
+    return res.json(publicUser(req.user));
+});
+
 app.get('/api/me/registrations', authenticate, requireScope('read', 'registrations'), (req, res) => {
     const registrations = db.registrations
         .filter((registration) => registration.uporabnik_id === req.user.id)
