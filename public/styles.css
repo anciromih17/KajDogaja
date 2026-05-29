@@ -425,7 +425,8 @@ h2 {
     gap: 10px;
 }
 
-body[data-role="uporabnik"] .form-panel { display: none; }
+body[data-role="uporabnik"] #openEventFormButton { display: none; }
+body:not([data-role]) #openEventFormButton { display: none; }
 body[data-role="uporabnik"] .event-actions { display: none; }
 body[data-role="organizator"] .event-register { display: none; }
 body:not([data-role]) .event-register { display: none; }
@@ -626,7 +627,7 @@ body[data-role="organizator"] .platform-panel {
 
 .content-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.85fr);
+    grid-template-columns: 1fr;
     gap: 16px;
     align-items: start;
 }
@@ -702,14 +703,38 @@ body[data-role="organizator"] .platform-panel {
     gap: 8px;
 }
 
-.list-panel,
-.form-panel {
+.list-panel {
     padding: 16px;
 }
 
 .section-head {
     justify-content: space-between;
     margin-bottom: 14px;
+}
+
+.list-head-actions,
+.modal-head-actions,
+.modal-form-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.modal-head-actions {
+    justify-content: flex-end;
+}
+
+.modal-form-actions {
+    justify-content: flex-end;
+    padding-top: 4px;
+}
+
+.event-form-modal {
+    max-width: 720px;
+}
+
+.event-form-modal form {
+    gap: 14px;
 }
 
 .events-list {
@@ -1257,6 +1282,9 @@ form {
     .app-header,
     .event-footer,
     .modal-toolbar,
+    .modal-head-actions,
+    .modal-form-actions,
+    .list-head-actions,
     .registration-card,
     .stat-event-card {
         align-items: stretch;

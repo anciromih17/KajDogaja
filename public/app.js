@@ -26,6 +26,10 @@ const elements = {
     voiceTranscript: document.getElementById('voiceTranscript'),
     eventsList: document.getElementById('eventsList'),
     eventCount: document.getElementById('eventCount'),
+    openEventFormButton: document.getElementById('openEventFormButton'),
+    eventFormOverlay: document.getElementById('eventFormOverlay'),
+    closeEventFormButton: document.getElementById('closeEventFormButton'),
+    cancelEventFormButton: document.getElementById('cancelEventFormButton'),
     form: document.getElementById('eventForm'),
     formTitle: document.getElementById('formTitle'),
     resetFormButton: document.getElementById('resetFormButton'),
@@ -437,6 +441,20 @@ function resetForm() {
     }
 }
 
+function openEventForm() {
+    elements.eventFormOverlay.hidden = false;
+    requestAnimationFrame(() => elements.eventName.focus());
+}
+
+function closeEventForm() {
+    elements.eventFormOverlay.hidden = true;
+}
+
+function openNewEventForm() {
+    resetForm();
+    openEventForm();
+}
+
 function fillForm(event) {
     elements.formTitle.textContent = 'Uredi dogodek';
     elements.eventId.value = event.id;
@@ -451,6 +469,7 @@ function fillForm(event) {
     elements.eventLat.value = event.koordinate_lat;
     elements.eventLng.value = event.koordinate_lng;
     elements.eventCapacity.value = event.kapaciteta || 1;
+    openEventForm();
 }
 
 function formPayload() {
@@ -981,6 +1000,9 @@ async function runVoiceCommand(transcript) {
             if (!value) {
                 throw new Error('Naziv ni bil podan.');
             }
+            if (elements.eventFormOverlay.hidden) {
+                openNewEventForm();
+            }
             elements.eventName.value = value;
             elements.eventName.focus();
             speak(`Naziv je nastavljen na ${value}.`);
@@ -989,8 +1011,7 @@ async function runVoiceCommand(transcript) {
         }
 
         if (normalized === 'nov dogodek') {
-            resetForm();
-            elements.eventName.focus();
+            openNewEventForm();
             speak('Obrazec za nov dogodek je pripravljen.');
             setVoiceStatus('Obrazec je pripravljen za nov dogodek.');
             return;
@@ -1250,9 +1271,11 @@ async function saveEvent(event) {
         await apiRequest(operation.path, { method: operation.method, body: operation.body });
         await notify('Shranjeno', eventId ? 'Dogodek je posodobljen.' : 'Nov dogodek je dodan.');
         resetForm();
+        closeEventForm();
         await loadEvents();
     } catch (error) {
         enqueueOperation(operation);
+        closeEventForm();
         await notify('Napaka', 'Povezava ni na voljo. Sprememba je shranjena za poznejšo sinhronizacijo.');
     }
 }
@@ -1376,6 +1399,12 @@ function bindEvents() {
     elements.categoryFilter.addEventListener('change', loadEvents);
     elements.cityFilter.addEventListener('change', loadEvents);
     elements.resetFormButton.addEventListener('click', resetForm);
+    elements.openEventFormButton?.addEventListener('click', openNewEventForm);
+    elements.closeEventFormButton?.addEventListener('click', closeEventForm);
+    elements.cancelEventFormButton?.addEventListener('click', closeEventForm);
+    elements.eventFormOverlay?.addEventListener('click', (event) => {
+        if (event.target === elements.eventFormOverlay) closeEventForm();
+    });
     elements.syncButton.addEventListener('click', syncQueue);
     elements.organizerSearch?.addEventListener('input', () => {
         renderEvents(state.events);
@@ -1568,14 +1597,16 @@ function bindEvents() {
         }
         if (event.altKey && key === 'n') {
             event.preventDefault();
-            resetForm();
-            elements.eventName.focus();
+            openNewEventForm();
         }
         if (event.ctrlKey && key === 's') {
             event.preventDefault();
-            elements.form.requestSubmit();
+            if (!elements.eventFormOverlay.hidden) {
+                elements.form.requestSubmit();
+            }
         }
         if (key === 'escape') {
+            closeEventForm();
             closeOrganizerDetail();
         }
     });
