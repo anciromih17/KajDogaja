@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                String             @id @default(cuid())
+  uporabnisko_ime   String
+  email             String             @unique
+  geslo_hash        String
+  vloga             String             @default("uporabnik")
+  ustvarjen         DateTime           @default(now())
+  events            Event[]
+  registrations     Registration[]
+  notifications     Notification[]
+  pushSubscriptions PushSubscription[]
+  oauthRefreshTokens OauthRefreshToken[]
+}
+
+model Category {
+  id     String  @id @default(cuid())
+  naziv  String  @unique
+  events Event[]
+}
+
+model City {
+  id              String  @id @default(cuid())
+  naziv           String  @unique
+  koordinate_lat  Float
+  koordinate_lng  Float
+  events          Event[]
+}
+
+model Event {
+  id             String         @id @default(cuid())
+  naziv          String
+  opis           String
+  datum          String
+  datum_do       String?
+  ura            String
+  lokacija       String
+  koordinate_lat Float?
+  koordinate_lng Float?
+  kapaciteta     Int?
+  qr_koda_url    String         @default("")
+  ustvarjen      DateTime       @default(now())
+  posodobljen    DateTime       @updatedAt
+  kategorija     Category       @relation(fields: [kategorija_id], references: [id])
+  kategorija_id  String
+  mesto          City           @relation(fields: [mesto_id], references: [id])
+  mesto_id       String
+  organizator    User           @relation(fields: [organizator_id], references: [id])
+  organizator_id String
+  registrations  Registration[]
+  notifications  Notification[]
+}
+
+model Registration {
+  id           String   @id @default(cuid())
+  status       String   @default("potrjena")
+  ustvarjena   DateTime @default(now())
+  uporabnik    User     @relation(fields: [uporabnik_id], references: [id])
+  uporabnik_id String
+  dogodek      Event    @relation(fields: [dogodek_id], references: [id])
+  dogodek_id   String
+}
+
+model Notification {
+  id           String   @id @default(cuid())
+  tip          String
+  vsebina      String
+  prebrano     Boolean  @default(false)
+  ustvarjeno   DateTime @default(now())
+  uporabnik    User     @relation(fields: [uporabnik_id], references: [id])
+  uporabnik_id String
+  dogodek      Event?   @relation(fields: [dogodek_id], references: [id])
+  dogodek_id   String?
+}
+
+model OauthClient {
+  id            String              @id
+  secret        String
+  name          String
+  redirect_uris String[]
+  scopes        String[]
+  refreshTokens OauthRefreshToken[]
+}
+
+model OauthRefreshToken {
+  id         String      @id @default(cuid())
+  token_hash String      @unique
+  scope      String
+  expires_at DateTime
+  revoked    Boolean     @default(false)
+  ustvarjen  DateTime    @default(now())
+  user       User        @relation(fields: [user_id], references: [id])
+  user_id    String
+  client     OauthClient @relation(fields: [client_id], references: [id])
+  client_id  String
+}
+
+model RevokedToken {
+  token      String   @id
+  ustvarjen  DateTime @default(now())
+}
+
+model PushSubscription {
+  id         String   @id @default(cuid())
+  endpoint   String
+  keys       Json     @default("{}")
+  ustvarjeno DateTime @default(now())
+  user       User     @relation(fields: [user_id], references: [id])
+  user_id    String
+}
+
+model PushMessage {
+  id         String    @id @default(cuid())
+  title      String
+  body       String
+  data       Json      @default("{}")
+  delivered  Boolean   @default(false)
+  delivered_at DateTime?
+  ustvarjeno DateTime  @default(now())
+}

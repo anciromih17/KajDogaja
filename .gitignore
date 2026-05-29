@@ -2,3 +2,5 @@ node_modules/
 data/db.json
 .oauth-tokens.json
 .env
+
+/generated/prisma

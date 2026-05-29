@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: kajdogaja-pg
+    environment:
+      POSTGRES_USER: kajdogaja
+      POSTGRES_PASSWORD: kajdogaja
+      POSTGRES_DB: kajdogaja
+    ports:
+      - "5432:5432"
+    volumes:
+      - kajdogaja_pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  kajdogaja_pg_data:
