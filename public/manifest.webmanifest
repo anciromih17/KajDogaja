@@ -1,10 +1,12 @@
 {
   "name": "KajDogaja",
   "short_name": "KajDogaja",
-  "description": "PWA odjemalec za upravljanje dogodkov prek REST API-ja.",
+  "description": "PWA odjemalec za odkrivanje dogodkov, organizatorsko upravljanje, offline delo in push obvestila.",
   "start_url": "/pwa",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "window-controls-overlay", "browser"],
+  "id": "/pwa",
   "background_color": "#f6f8fb",
   "theme_color": "#0f766e",
   "orientation": "portrait-primary",

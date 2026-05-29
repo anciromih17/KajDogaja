@@ -1,10 +1,12 @@
-const CACHE_NAME = 'kajdogaja-static-v16';
+const CACHE_NAME = 'kajdogaja-static-v22';
 const STATIC_ASSETS = [
     '/pwa',
     '/pwa/',
     '/pwa/index.html',
-    '/pwa/styles.css?v=16',
-    '/pwa/app.js?v=16',
+    '/pwa/styles.css?v=22',
+    '/pwa/auth.css',
+    '/pwa/auth.js',
+    '/pwa/app.js?v=22',
     '/manifest.webmanifest',
     '/icons/icon-192.svg',
     '/icons/icon-512.svg'
@@ -37,8 +39,10 @@ self.addEventListener('fetch', (event) => {
         event.respondWith(
             fetch(request)
                 .then((response) => {
-                    const clone = response.clone();
-                    caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+                    if (response.ok) {
+                        const clone = response.clone();
+                        caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+                    }
                     return response;
                 })
                 .catch(() => caches.match(request))
@@ -71,7 +75,16 @@ self.addEventListener('fetch', (event) => {
     }
 
     event.respondWith(
-        caches.match(request).then((cached) => cached || fetch(request))
+        caches.match(request).then((cached) => {
+            const network = fetch(request).then((response) => {
+                if (response.ok) {
+                    const clone = response.clone();
+                    caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+                }
+                return response;
+            }).catch(() => cached);
+            return cached || network;
+        })
     );
 });
 

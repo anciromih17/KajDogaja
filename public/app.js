@@ -8,7 +8,8 @@ const STORE_KEYS = {
     events: 'kajdogaja_pwa_events',
     categories: 'kajdogaja_pwa_categories',
     cities: 'kajdogaja_pwa_cities',
-    queue: 'kajdogaja_pwa_queue'
+    queue: 'kajdogaja_pwa_queue',
+    platform: 'kajdogaja_pwa_platform'
 };
 
 const elements = {
@@ -45,6 +46,15 @@ const elements = {
     totalEventsStat: document.getElementById('totalEventsStat'),
     categoryStat: document.getElementById('categoryStat'),
     queueStat: document.getElementById('queueStat'),
+    platformStat: document.getElementById('platformStat'),
+    organizerSearch: document.getElementById('organizerSearch'),
+    organizerCapacityFilter: document.getElementById('organizerCapacityFilter'),
+    pushButton: document.getElementById('pushButton'),
+    pushStatus: document.getElementById('pushStatus'),
+    platformSyncStatus: document.getElementById('platformSyncStatus'),
+    organizerDetailOverlay: document.getElementById('organizerDetailOverlay'),
+    organizerDetailTitle: document.getElementById('organizerDetailTitle'),
+    organizerDetailBody: document.getElementById('organizerDetailBody'),
     profileButton: document.getElementById('profileButton'),
     profileDropdown: document.getElementById('profileDropdown'),
     profileAvatar: document.getElementById('profileAvatar'),
@@ -76,7 +86,8 @@ let state = {
     voiceSupported: false,
     pendingRegister: null,
     currentUserId: null,
-    currentUserRole: null
+    currentUserRole: null,
+    organizerDetailEventId: null
 };
 
 function readStore(key, fallback) {
@@ -88,10 +99,28 @@ function writeStore(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
 }
 
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    }[char]));
+}
+
+function csvEscape(value) {
+    return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
 function updateStats() {
-    elements.totalEventsStat.textContent = String(state.events.length);
+    const visibleEvents = state.currentUserRole === 'organizator' && state.currentUserId
+        ? getOrganizerEvents()
+        : state.events;
+    elements.totalEventsStat.textContent = String(visibleEvents.length);
     elements.categoryStat.textContent = String(state.categories.length);
     elements.queueStat.textContent = String(readStore(STORE_KEYS.queue, []).length);
+    updatePlatformStatus();
 }
 
 function formatDisplayDate(dateValue) {
@@ -148,10 +177,52 @@ function setConnectionStatus(isConnected) {
     state.isConnected = isConnected;
     elements.connectionStatus.textContent = isConnected ? 'Online' : 'Offline';
     elements.connectionStatus.classList.toggle('offline', !isConnected);
+    updatePlatformStatus();
 }
 
 function updateConnectionStatus() {
     setConnectionStatus(navigator.onLine);
+}
+
+function updatePlatformStatus(message) {
+    const queueSize = readStore(STORE_KEYS.queue, []).length;
+    const platform = readStore(STORE_KEYS.platform, {});
+    const permission = 'Notification' in window ? Notification.permission : 'unsupported';
+    if (elements.platformStat) {
+        elements.platformStat.textContent = state.isConnected ? 'Aktivna' : 'Offline';
+    }
+    if (elements.pushStatus) {
+        elements.pushStatus.textContent = permission === 'granted'
+            ? 'Sistemska obvestila so omogočena.'
+            : permission === 'denied'
+                ? 'Obvestila so v brskalniku zavrnjena.'
+                : 'Obvestila čakajo na dovoljenje.';
+    }
+    if (elements.platformSyncStatus) {
+        const synced = platform.last_sync ? `Zadnja sinhronizacija: ${new Date(platform.last_sync).toLocaleString('sl-SI')}` : 'Sinhronizacija še ni bila izvedena.';
+        elements.platformSyncStatus.textContent = message || `${state.isConnected ? 'Online' : 'Offline'} · ${queueSize} v čakalni vrsti · ${synced}`;
+    }
+}
+
+function getOrganizerEvents() {
+    let events = state.events;
+    if (state.currentUserRole === 'organizator' && state.currentUserId) {
+        events = events.filter((event) => event.organizator_id === state.currentUserId);
+    }
+    const query = elements.organizerSearch?.value.trim().toLowerCase();
+    if (query) {
+        events = events.filter((event) =>
+            [event.naziv, event.opis, event.lokacija, event.mesto?.naziv, event.kategorija?.naziv]
+                .some((value) => String(value || '').toLowerCase().includes(query))
+        );
+    }
+    if (elements.organizerCapacityFilter?.value === 'near-full') {
+        events = events.filter((event) => event.kapaciteta && ((event.st_prijav || 0) / event.kapaciteta) >= 0.75);
+    }
+    if (elements.organizerCapacityFilter?.value === 'open') {
+        events = events.filter((event) => !event.kapaciteta || (event.st_prijav || 0) < event.kapaciteta);
+    }
+    return events;
 }
 
 async function registerServiceWorker() {
@@ -269,9 +340,7 @@ async function loadEvents() {
 }
 
 function renderEvents(events) {
-    if (state.currentUserRole === 'organizator' && state.currentUserId) {
-        events = events.filter(e => e.organizator_id === state.currentUserId);
-    }
+    events = state.currentUserRole === 'organizator' ? getOrganizerEvents() : events;
 
     elements.eventCount.textContent = `${events.length} zadetkov`;
     elements.eventsList.innerHTML = '';
@@ -283,20 +352,40 @@ function renderEvents(events) {
 
     for (const event of events) {
         const dateLabel = getEventDateLabel(event);
+        const registrations = event.st_prijav || 0;
+        const capacity = event.kapaciteta || 0;
+        const occupancy = capacity ? Math.min(Math.round((registrations / capacity) * 100), 100) : 0;
+        const qrSrc = event.qr_koda_url || '';
         const card = document.createElement('article');
         card.className = 'event-card';
         card.innerHTML = `
-            <h3>${event.naziv}</h3>
-            <p>${event.opis}</p>
+            <div class="event-card-head">
+                <h3>${escapeHtml(event.naziv)}</h3>
+                <span class="occupancy-pill">${registrations}/${capacity || '-'}</span>
+            </div>
+            <p>${escapeHtml(event.opis)}</p>
             <div class="event-meta">
-                <span class="chip">${dateLabel} ob ${event.ura}</span>
-                <span class="chip">${event.mesto?.naziv || event.mesto_id}</span>
-                <span class="chip">${event.kategorija?.naziv || event.kategorija_id}</span>
-                <span class="chip">${event.st_prijav || 0}/${event.kapaciteta || '-'}</span>
+                <span class="chip">${escapeHtml(dateLabel)} ob ${escapeHtml(event.ura)}</span>
+                <span class="chip">${escapeHtml(event.mesto?.naziv || event.mesto_id)}</span>
+                <span class="chip">${escapeHtml(event.kategorija?.naziv || event.kategorija_id)}</span>
+                <span class="chip">${escapeHtml(event.lokacija)}</span>
+            </div>
+            <div class="occupancy-meter" aria-label="Zasedenost dogodka">
+                <span style="width:${occupancy}%"></span>
             </div>
             <div class="event-footer">
-                <img class="qr-preview lazy-img" alt="QR koda dogodka" data-src="${event.qr_koda_url || ''}">
+                <button type="button" class="qr-button" data-action="qr" data-id="${event.id}" title="Prikaži QR kodo">
+                    <img class="qr-preview lazy-img" alt="QR koda dogodka" data-src="${qrSrc}">
+                </button>
                 <div class="event-actions">
+                    <button type="button" class="ghost icon-button" data-action="registrations" data-id="${event.id}">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        Prijave
+                    </button>
+                    <button type="button" class="ghost icon-button" data-action="stats" data-id="${event.id}">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18M7 15v3M12 9v9M17 5v13"/></svg>
+                        Statistika
+                    </button>
                     <button type="button" data-action="edit" data-id="${event.id}">Uredi</button>
                     <button type="button" class="danger" data-action="delete" data-id="${event.id}">Izbriši</button>
                 </div>
@@ -329,7 +418,11 @@ function setupLazyImages() {
         }
     }, { rootMargin: '80px' });
 
-    images.forEach((image) => state.lazyObserver.observe(image));
+    images.forEach((image) => {
+        if (image.dataset.src) {
+            state.lazyObserver.observe(image);
+        }
+    });
 }
 
 function resetForm() {
@@ -443,7 +536,7 @@ function closeProfileEdit() {
 async function loadOrganizerStats() {
     elements.myRegistrationsList.innerHTML = '<p class="muted">Nalagam statistike ...</p>';
 
-    const myEvents = state.events.filter(e => e.organizator_id === state.currentUserId);
+    const myEvents = getOrganizerEvents();
 
     if (!myEvents.length) {
         elements.myRegistrationsList.innerHTML = '<p class="muted">Nimate še nobenih dogodkov.</p>';
@@ -470,8 +563,8 @@ async function loadOrganizerStats() {
 
         return `<div class="stat-event-card">
             <div class="stat-event-info">
-                <strong>${event.naziv}</strong>
-                <span>${dateLabel} ob ${event.ura} · ${event.lokacija}</span>
+                <strong>${escapeHtml(event.naziv)}</strong>
+                <span>${escapeHtml(dateLabel)} ob ${escapeHtml(event.ura)} · ${escapeHtml(event.lokacija)}</span>
             </div>
             <div class="stat-event-numbers">
                 <div class="stat-event-bar-wrap">
@@ -483,8 +576,159 @@ async function loadOrganizerStats() {
                 </div>
                 ${prosta !== null ? `<span class="stat-muted">${prosta} prostih mest</span>` : ''}
             </div>
+            <button class="ghost compact-button" data-action="registrations" data-id="${event.id}">Seznam</button>
         </div>`;
     }).join('');
+}
+
+function closeOrganizerDetail() {
+    state.organizerDetailEventId = null;
+    elements.organizerDetailOverlay.hidden = true;
+    elements.organizerDetailBody.innerHTML = '';
+}
+
+async function getEventQr(event) {
+    if (event.qr_koda_url) {
+        return event.qr_koda_url;
+    }
+    const qr = await apiRequest(`/events/${event.id}/qr`, { auth: false });
+    return qr.qr_koda_url || '';
+}
+
+async function openOrganizerQr(eventId) {
+    const event = state.events.find((item) => item.id === eventId);
+    if (!event) return;
+    state.organizerDetailEventId = eventId;
+    elements.organizerDetailTitle.textContent = `QR: ${event.naziv}`;
+    elements.organizerDetailBody.innerHTML = '<p class="muted">Nalagam QR kodo ...</p>';
+    elements.organizerDetailOverlay.hidden = false;
+
+    try {
+        const qrUrl = await getEventQr(event);
+        elements.organizerDetailBody.innerHTML = `
+            <div class="qr-detail">
+                ${qrUrl ? `<img src="${qrUrl}" alt="QR koda za dogodek ${escapeHtml(event.naziv)}">` : '<p class="muted">QR koda za ta dogodek še ni ustvarjena.</p>'}
+                <div>
+                    <strong>${escapeHtml(event.naziv)}</strong>
+                    <span>${escapeHtml(getEventDateLabel(event))} ob ${escapeHtml(event.ura)}</span>
+                    <span>${escapeHtml(event.lokacija)}</span>
+                </div>
+            </div>`;
+    } catch (error) {
+        elements.organizerDetailBody.innerHTML = '<p class="muted">QR kode trenutno ni mogoče naložiti.</p>';
+    }
+}
+
+async function loadEventRegistrations(eventId) {
+    const registrations = await apiRequest(`/events/${eventId}/registrations`);
+    registrations.sort((a, b) => new Date(a.ustvarjena) - new Date(b.ustvarjena));
+    return registrations;
+}
+
+function downloadText(filename, text, type = 'text/csv;charset=utf-8') {
+    const blob = new Blob([text], { type });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
+function buildRegistrationsCsv(event, registrations) {
+    const rows = [
+        ['dogodek', 'uporabnik', 'email', 'status', 'ustvarjena'],
+        ...registrations.map((registration) => [
+            event.naziv,
+            registration.uporabnik?.uporabnisko_ime || '',
+            registration.uporabnik?.email || '',
+            registration.status || '',
+            registration.ustvarjena ? new Date(registration.ustvarjena).toLocaleString('sl-SI') : ''
+        ])
+    ];
+    return rows.map((row) => row.map(csvEscape).join(',')).join('\n');
+}
+
+async function exportRegistrations(eventId) {
+    const event = state.events.find((item) => item.id === eventId);
+    if (!event) return;
+    try {
+        const registrations = await loadEventRegistrations(eventId);
+        const safeName = simplifyText(event.naziv).replace(/\s+/g, '-').slice(0, 48) || 'dogodek';
+        downloadText(`prijave-${safeName}.csv`, buildRegistrationsCsv(event, registrations));
+        toast('CSV izvoz je pripravljen.');
+    } catch (error) {
+        notify('Napaka', error.message);
+    }
+}
+
+async function openEventRegistrations(eventId) {
+    const event = state.events.find((item) => item.id === eventId);
+    if (!event) return;
+    state.organizerDetailEventId = eventId;
+    elements.organizerDetailTitle.textContent = `Prijave: ${event.naziv}`;
+    elements.organizerDetailBody.innerHTML = '<p class="muted">Nalagam prijavljene uporabnike ...</p>';
+    elements.organizerDetailOverlay.hidden = false;
+
+    try {
+        const registrations = await loadEventRegistrations(eventId);
+        elements.organizerDetailBody.innerHTML = `
+            <div class="modal-toolbar">
+                <span class="muted">${registrations.length} prijav</span>
+                <button type="button" class="ghost icon-button" data-export-registrations="${eventId}">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+                    CSV izvoz
+                </button>
+            </div>
+            <div class="attendees-list">
+                ${registrations.length ? registrations.map((registration) => `
+                    <div class="attendee-row">
+                        <div class="attendee-avatar">${escapeHtml((registration.uporabnik?.uporabnisko_ime || '?').charAt(0).toUpperCase())}</div>
+                        <div>
+                            <strong>${escapeHtml(registration.uporabnik?.uporabnisko_ime || 'Uporabnik')}</strong>
+                            <span>${escapeHtml(registration.uporabnik?.email || '-')}</span>
+                        </div>
+                        <span class="chip">${escapeHtml(registration.status || 'potrjena')}</span>
+                    </div>
+                `).join('') : '<p class="muted">Na dogodek še ni prijav.</p>'}
+            </div>`;
+    } catch (error) {
+        elements.organizerDetailBody.innerHTML = `<p class="muted">${escapeHtml(error.message)}</p>`;
+    }
+}
+
+async function openEventStats(eventId) {
+    const event = state.events.find((item) => item.id === eventId);
+    if (!event) return;
+    state.organizerDetailEventId = eventId;
+    elements.organizerDetailTitle.textContent = `Statistika: ${event.naziv}`;
+    elements.organizerDetailBody.innerHTML = '<p class="muted">Nalagam statistiko ...</p>';
+    elements.organizerDetailOverlay.hidden = false;
+
+    try {
+        const stats = await apiRequest(`/events/${eventId}/stats`);
+        const pct = stats.zasedenost_odstotek ?? 0;
+        elements.organizerDetailBody.innerHTML = `
+            <div class="stats-detail-grid">
+                <div><span>Prijave</span><strong>${stats.skupaj_prijav}</strong></div>
+                <div><span>Kapaciteta</span><strong>${stats.kapaciteta ?? '∞'}</strong></div>
+                <div><span>Prosto</span><strong>${stats.prostih_mest ?? '∞'}</strong></div>
+                <div><span>Zasedenost</span><strong>${pct}%</strong></div>
+            </div>
+            <div class="stat-event-bar-wrap large"><div class="stat-event-bar" style="width:${pct}%;"></div></div>
+            <div class="daily-bars">
+                ${(stats.prijave_po_dnevih || []).length ? stats.prijave_po_dnevih.map((item) => `
+                    <div class="daily-row">
+                        <span>${escapeHtml(formatDisplayDate(item.datum))}</span>
+                        <strong>${item.stevilo}</strong>
+                    </div>
+                `).join('') : '<p class="muted">Za ta dogodek še ni dnevne statistike prijav.</p>'}
+            </div>`;
+    } catch (error) {
+        elements.organizerDetailBody.innerHTML = `<p class="muted">${escapeHtml(error.message)}</p>`;
+    }
 }
 
 async function loadMyRegistrations() {
@@ -495,6 +739,7 @@ async function loadMyRegistrations() {
     try {
         const registrations = await apiRequest('/me/registrations');
         elements.myRegistrationsCount.textContent = registrations.length;
+        elements.myRegistrationsCount.hidden = registrations.length === 0;
 
         if (registrations.length === 0) {
             elements.myRegistrationsList.innerHTML = '<p class="muted">Nisi prijavljen na noben dogodek.</p>';
@@ -503,11 +748,11 @@ async function loadMyRegistrations() {
 
         elements.myRegistrationsList.innerHTML = registrations.map(reg => {
             const e = reg.dogodek;
-            const date = e.datum_od ? new Date(e.datum_od).toLocaleDateString('sl-SI') : '-';
+            const date = getEventDateLabel(e);
             return `<div class="registration-card">
                 <div class="registration-info">
-                    <strong>${e.naziv}</strong>
-                    <span>${date} · ${e.mesto?.naziv || '-'} · ${e.kategorija?.naziv || '-'}</span>
+                    <strong>${escapeHtml(e.naziv)}</strong>
+                    <span>${escapeHtml(date)} · ${escapeHtml(e.mesto?.naziv || '-')} · ${escapeHtml(e.kategorija?.naziv || '-')}</span>
                 </div>
                 <button class="ghost icon-button" data-unregister="${e.id}" title="Odjavi se">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
@@ -537,8 +782,8 @@ async function loadNotifications() {
         list.innerHTML = notifications.map(n => `
             <div class="notification-card${n.prebrano ? '' : ' unread'}" data-id="${n.id}">
                 <div class="notification-info">
-                    <strong>${n.naslov || 'Obvestilo'}</strong>
-                    <span>${n.sporocilo || ''}</span>
+                    <strong>${escapeHtml(n.naslov || n.tip || 'Obvestilo')}</strong>
+                    <span>${escapeHtml(n.sporocilo || n.vsebina || '')}</span>
                     <span class="notification-time">${new Date(n.ustvarjeno).toLocaleString('sl-SI')}</span>
                 </div>
                 <div class="notification-actions">
@@ -1032,9 +1277,11 @@ async function syncQueue() {
     const queue = readStore(STORE_KEYS.queue, []);
     if (!queue.length) {
         toast('Ni čakajočih sprememb.');
+        updatePlatformStatus();
         return;
     }
 
+    updatePlatformStatus(`Sinhroniziram ${queue.length} sprememb ...`);
     const remaining = [];
     for (const operation of queue) {
         try {
@@ -1045,6 +1292,7 @@ async function syncQueue() {
     }
 
     writeStore(STORE_KEYS.queue, remaining);
+    writeStore(STORE_KEYS.platform, { ...readStore(STORE_KEYS.platform, {}), last_sync: new Date().toISOString() });
     updateStats();
     if (remaining.length) {
         await notify('Napaka', 'Nekaterih sprememb ni bilo mogoče sinhronizirati.');
@@ -1055,15 +1303,44 @@ async function syncQueue() {
 }
 
 async function subscribePush() {
+    if (!('Notification' in window)) {
+        updatePlatformStatus('Brskalnik ne podpira sistemskih obvestil.');
+        return;
+    }
+
     try {
+        if (Notification.permission === 'default') {
+            await Notification.requestPermission();
+        }
+        if (Notification.permission !== 'granted') {
+            updatePlatformStatus();
+            return;
+        }
         const registration = await navigator.serviceWorker?.ready;
-        const endpoint = registration ? `local-sw-${Date.now()}` : `local-page-${Date.now()}`;
+        const platform = readStore(STORE_KEYS.platform, {});
+        const endpoint = platform.push_endpoint || (registration ? `local-sw-${crypto.randomUUID?.() || Date.now()}` : `local-page-${Date.now()}`);
         await apiRequest('/push/subscribe', {
             method: 'POST',
             body: { endpoint, keys: { mode: 'local-demo' } }
         });
+        writeStore(STORE_KEYS.platform, { ...platform, push_endpoint: endpoint, push_subscribed_at: new Date().toISOString() });
+        updatePlatformStatus('Push naročnina je aktivna.');
     } catch (error) {
         toast('Naročanje na push obvestila ni uspelo.', 'error');
+        updatePlatformStatus();
+    }
+}
+
+async function sendPushDemo() {
+    try {
+        await subscribePush();
+        await apiRequest('/push/send', {
+            method: 'POST',
+            body: { title: 'KajDogaja', body: 'Testno obvestilo za organizatorsko predstavitev.', url: '/pwa' }
+        });
+        await deliverPushMessages();
+    } catch (error) {
+        notify('Napaka', error.message);
     }
 }
 
@@ -1081,6 +1358,7 @@ async function deliverPushMessages() {
                 await notify(message.title, message.body);
             }
         }
+        updatePlatformStatus(`${messages.length} push sporočil je prevzetih.`);
     } catch (error) {
     }
 }
@@ -1099,6 +1377,15 @@ function bindEvents() {
     elements.cityFilter.addEventListener('change', loadEvents);
     elements.resetFormButton.addEventListener('click', resetForm);
     elements.syncButton.addEventListener('click', syncQueue);
+    elements.organizerSearch?.addEventListener('input', () => {
+        renderEvents(state.events);
+        if (state.currentUserRole === 'organizator') loadMyRegistrations();
+    });
+    elements.organizerCapacityFilter?.addEventListener('change', () => {
+        renderEvents(state.events);
+        if (state.currentUserRole === 'organizator') loadMyRegistrations();
+    });
+    elements.pushButton?.addEventListener('click', sendPushDemo);
     elements.addCategoryButton.addEventListener('click', addCategoryFromPrompt);
     elements.addCityButton.addEventListener('click', addCityFromPrompt);
     elements.form.addEventListener('submit', saveEvent);
@@ -1171,6 +1458,18 @@ function bindEvents() {
     elements.myRegistrationsList.addEventListener('click', async (e) => {
         const btn = e.target.closest('[data-unregister]');
         if (btn) await unregisterFromEvent(btn.dataset.unregister);
+        const actionBtn = e.target.closest('button[data-action]');
+        if (!actionBtn) return;
+        if (actionBtn.dataset.action === 'registrations') await openEventRegistrations(actionBtn.dataset.id);
+    });
+
+    document.getElementById('closeOrganizerDetail')?.addEventListener('click', closeOrganizerDetail);
+    elements.organizerDetailOverlay?.addEventListener('click', (e) => {
+        if (e.target === elements.organizerDetailOverlay) closeOrganizerDetail();
+    });
+    elements.organizerDetailBody?.addEventListener('click', async (e) => {
+        const exportBtn = e.target.closest('[data-export-registrations]');
+        if (exportBtn) await exportRegistrations(exportBtn.dataset.exportRegistrations);
     });
 
     document.getElementById('notificationsList').addEventListener('click', async (e) => {
@@ -1223,6 +1522,15 @@ function bindEvents() {
         if (button.dataset.action === 'delete') {
             deleteEvent(button.dataset.id);
         }
+        if (button.dataset.action === 'qr') {
+            openOrganizerQr(button.dataset.id);
+        }
+        if (button.dataset.action === 'registrations') {
+            openEventRegistrations(button.dataset.id);
+        }
+        if (button.dataset.action === 'stats') {
+            openEventStats(button.dataset.id);
+        }
         if (button.dataset.action === 'register') {
             showRegisterConfirm(button.dataset.id, button);
         }
@@ -1267,6 +1575,9 @@ function bindEvents() {
             event.preventDefault();
             elements.form.requestSubmit();
         }
+        if (key === 'escape') {
+            closeOrganizerDetail();
+        }
     });
 }
 
@@ -1281,7 +1592,7 @@ async function initApp() {
     await loadEvents();
     await loadMyRegistrations();
     await loadNotifications();
-    await subscribePush();
+    updatePlatformStatus();
     syncVoicePanelHeight();
 }
 

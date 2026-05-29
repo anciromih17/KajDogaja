@@ -7,7 +7,7 @@
     <title>KajDogaja</title>
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/pwa/styles.css?v=19">
+    <link rel="stylesheet" href="/pwa/styles.css?v=22">
     <link rel="stylesheet" href="/pwa/auth.css">
 </head>
 <body>
@@ -91,6 +91,15 @@
                     <strong id="queueStat">0</strong>
                 </div>
             </article>
+            <article class="stat-card">
+                <span class="stat-icon">
+                    <svg viewBox="0 0 24 24"><path d="M12 2v20M2 12h20M5 5l14 14M19 5 5 19"/></svg>
+                </span>
+                <div>
+                    <p>PWA platforma</p>
+                    <strong id="platformStat">Aktivna</strong>
+                </div>
+            </article>
         </section>
 
         <nav class="main-nav" aria-label="Navigacija">
@@ -137,7 +146,38 @@
                         </select>
                     </label>
                 </div>
+                <div class="organizer-tools" aria-label="Organizatorski filtri">
+                    <label>
+                        Moji dogodki
+                        <input id="organizerSearch" type="search" placeholder="Filtriraj po nazivu, lokaciji ...">
+                    </label>
+                    <label>
+                        Zasedenost
+                        <select id="organizerCapacityFilter">
+                            <option value="">Vsi moji dogodki</option>
+                            <option value="open">Še imajo prostor</option>
+                            <option value="near-full">Skoraj polni</option>
+                        </select>
+                    </label>
+                </div>
                 <p class="hint">Bližnjice: Ctrl+K iskanje, Alt+N nov dogodek, Ctrl+S shrani obrazec.</p>
+            </section>
+
+            <section class="panel platform-panel" aria-label="PWA platforma">
+                <div class="section-head">
+                    <h2 class="section-title-with-icon">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M2 12h20M5 5l14 14M19 5 5 19"/></svg>
+                        PWA platforma
+                    </h2>
+                    <button id="pushButton" type="button" class="ghost icon-button">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+                        Test push
+                    </button>
+                </div>
+                <div class="platform-grid">
+                    <span id="platformSyncStatus" class="muted">Preverjam sinhronizacijo ...</span>
+                    <span id="pushStatus" class="muted">Preverjam obvestila ...</span>
+                </div>
             </section>
 
             <section class="panel voice-panel" aria-label="Glasovno upravljanje">
@@ -427,7 +467,20 @@
         </div>
     </div>
 
+    <!-- Organizatorske podrobnosti -->
+    <div id="organizerDetailOverlay" class="modal-overlay" hidden>
+        <div class="modal-card modal-card-wide">
+            <div class="modal-head">
+                <h3 id="organizerDetailTitle">Podrobnosti dogodka</h3>
+                <button id="closeOrganizerDetail" type="button" class="ghost icon-button" style="padding:6px;">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div id="organizerDetailBody" class="organizer-detail-body"></div>
+        </div>
+    </div>
+
     <script src="/pwa/auth.js" defer></script>
-    <script src="/pwa/app.js?v=21" defer></script>
+    <script src="/pwa/app.js?v=22" defer></script>
 </body>
 </html>

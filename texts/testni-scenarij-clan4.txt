@@ -1,0 +1,14 @@
+Testni scenarij za zagovor - Clan 4
+
+1. Prijavi se kot organizator.
+2. Ustvari nov dogodek z datumom, kapaciteto, mestom, kategorijo in koordinatami.
+3. Osvezi aplikacijo in preveri, da je dogodek viden v pregledu "Moji dogodki".
+4. Uporabi organizatorski filter po nazivu in filter "Skoraj polni" oziroma "Se imajo prostor".
+5. Odpri QR kodo dogodka iz kartice dogodka.
+6. Odpri statistiko dogodka in preveri zasedenost, prosta mesta in dnevne prijave.
+7. Odpri seznam prijavljenih uporabnikov in izvozi CSV.
+8. Izklopi omrezje v brskalniku, osvezi PWA in preveri, da se aplikacijska lupina nalozi iz cache-a.
+9. Offline uredi ali izbrisi dogodek in preveri stevec "Caka sinhronizacijo".
+10. Ponovno vklopi omrezje in klikni sinhronizacijo; cakalna vrsta se izprazni.
+11. Klikni "Test push", dovoli obvestila in preveri sistemsko obvestilo.
+12. Preveri, da gumb mikrofona se vedno sprejme ukaze "nov dogodek", "shrani dogodek" in "sinhroniziraj".
