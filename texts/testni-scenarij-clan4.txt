@@ -1,14 +1,97 @@
-Testni scenarij za zagovor - Clan 4
+Rocni testni scenariji za PWA - Clan 4
 
+Namen:
+Ta dokument je dokaz rocno dokumentiranega testiranja PWA tokov za organizatorski modul, offline delovanje, service worker cache, push obvestila, responsive delovanje in finalno integracijo.
+
+Predpogoji:
+1. Zazeni PostgreSQL z `docker compose up -d`.
+2. Nastavi `DATABASE_URL=postgresql://kajdogaja:kajdogaja@localhost:5432/kajdogaja`.
+3. Izvedi migracije in seed: `npx prisma migrate deploy` in `npm run db:seed`.
+4. Zazeni aplikacijo z `npm start`.
+5. Odpri `http://localhost:3000/pwa`.
+6. Za test uporabi demo racuna:
+   - organizator: `organizator@kajdogaja.si` / `organizator123`
+   - uporabnik: `uporabnik@kajdogaja.si` / `uporabnik123`
+
+Scenarij A - PWA namestitev in osnovni zagon:
+1. Odpri `/pwa` v Chromium brskalniku.
+2. Preveri, da se nalozijo `manifest.webmanifest`, `sw.js`, `app.js?v=24` in `styles.css?v=24`.
+3. V DevTools preveri, da je service worker registriran in aktiven.
+4. Preveri, da aplikacija prikaze status `Online`.
+5. Priakovani rezultat: aplikacija se nalozi brez napak v konzoli in je installable kot PWA.
+
+Scenarij B - reload offline:
+1. Kot organizator se prijavi v aplikacijo.
+2. Enkrat nalozi dogodke, kategorije in mesta, da se podatki shranijo v cache/localStorage.
+3. V DevTools nastavi Network na Offline.
+4. Osvezi stran `/pwa`.
+5. Priakovani rezultat: aplikacijska lupina se nalozi iz service worker cache-a, prikazan je status `Offline`, zadnji znani dogodki pa so prikazani iz lokalne shrambe.
+
+Scenarij C - offline queue in recovery po reconnect:
+1. Ostani offline.
+2. Kot organizator odpri modal `Nov dogodek`.
+3. Vnesi dogodek z nazivom, opisom, datumom, uro, lokacijo, kategorijo, mestom, koordinatami in kapaciteto.
+4. Klikni `Shrani dogodek`.
+5. Preveri, da se poveca stevec `Caka sinhronizacijo`.
+6. Ponovno nastavi Network na Online.
+7. Klikni gumb za sinhronizacijo ali pocakaj na `online` dogodek.
+8. Priakovani rezultat: cakalna vrsta se izprazni, dogodek se poslje na API, seznam dogodkov se ponovno nalozi.
+
+Scenarij D - organizatorski create/edit/delete flow:
 1. Prijavi se kot organizator.
-2. Ustvari nov dogodek z datumom, kapaciteto, mestom, kategorijo in koordinatami.
-3. Osvezi aplikacijo in preveri, da je dogodek viden v pregledu "Moji dogodki".
-4. Uporabi organizatorski filter po nazivu in filter "Skoraj polni" oziroma "Se imajo prostor".
-5. Odpri QR kodo dogodka iz kartice dogodka.
-6. Odpri statistiko dogodka in preveri zasedenost, prosta mesta in dnevne prijave.
-7. Odpri seznam prijavljenih uporabnikov in izvozi CSV.
-8. Izklopi omrezje v brskalniku, osvezi PWA in preveri, da se aplikacijska lupina nalozi iz cache-a.
-9. Offline uredi ali izbrisi dogodek in preveri stevec "Caka sinhronizacijo".
-10. Ponovno vklopi omrezje in klikni sinhronizacijo; cakalna vrsta se izprazni.
-11. Klikni "Test push", dovoli obvestila in preveri sistemsko obvestilo.
-12. Preveri, da gumb mikrofona se vedno sprejme ukaze "nov dogodek", "shrani dogodek" in "sinhroniziraj".
+2. Klikni `Nov dogodek`.
+3. Preveri, da se obrazec odpre v modalnem oknu in fokus pade na polje `Naziv`.
+4. Ustvari nov dogodek.
+5. Na kartici dogodka klikni `Uredi`.
+6. Preveri, da se isti modal odpre z izpolnjenimi podatki.
+7. Spremeni naziv ali kapaciteto in shrani.
+8. Klikni `Izbrisi` in potrdi brisanje.
+9. Priakovani rezultat: vse spremembe so vidne v seznamu, brez rocnega posega v kodo.
+
+Scenarij E - organizatorski pregledi:
+1. Prijavi se kot organizator.
+2. V pregledu dogodkov uporabi filter `Moji dogodki`.
+3. Uporabi filter zasedenosti `Se imajo prostor` ali `Skoraj polni`.
+4. Na dogodku klikni `Prijave`.
+5. Preveri seznam prijavljenih uporabnikov.
+6. Klikni `CSV izvoz`.
+7. Klikni `Statistika`.
+8. Preveri stevilo prijav, kapaciteto, prosta mesta, odstotek zasedenosti in dnevne prijave.
+9. Klikni QR sliko oziroma QR akcijo.
+10. Priakovani rezultat: prijave, statistika, QR koda in CSV izvoz so dostopni v modalnih oknih.
+
+Scenarij F - push tok:
+1. Prijavi se kot organizator.
+2. Klikni `Test push`.
+3. Ce brskalnik zahteva dovoljenje, izberi `Allow`.
+4. Preveri status v PWA platformnem panelu.
+5. Priakovani rezultat: aplikacija izvede subscribe na `/api/push/subscribe`, pripravi sporocilo prek `/api/push/send`, prevzame sporocila prek `/api/push/messages` in prikaze sistemsko obvestilo prek service workerja.
+
+Scenarij G - responsive in accessibility smoke test:
+1. Preveri desktop sirino.
+2. Preveri mobilno sirino okoli 390 px.
+3. Preveri, da se navigacija, kartice, modal dogodka in modal statistik ne prekrivajo.
+4. S tipkovnico odpri `Alt+N`, zapri modal z `Escape`, v iskanje pojdi s `Ctrl+K`.
+5. Priakovani rezultat: tekst ne uhaja iz gumbov, modal je uporaben na mobilni sirini, osnovni keyboard flow deluje.
+
+Scenarij H - glasovno upravljanje po integraciji:
+1. Prijavi se kot organizator v Chromium brskalniku.
+2. Klikni mikrofon.
+3. Preveri ukaz `nov dogodek`.
+4. Preveri ukaz `nastavi naziv Testni dogodek`.
+5. Preveri ukaz `shrani dogodek`, ko so obvezna polja izpolnjena.
+6. Preveri ukaz `sinhroniziraj`.
+7. Priakovani rezultat: glasovni tok se po integraciji z modalom in offline queue ni zlomil.
+
+Scenarij I - uporabniski tok po integraciji:
+1. Odjavi organizatorja.
+2. Prijavi se kot navaden uporabnik.
+3. Preveri, da gumbi za urejanje organizatorja niso prikazani.
+4. Prijavi se na dogodek.
+5. Odpri `Moje prijave`.
+6. Odjavi se z dogodka.
+7. Odpri `Obvestila`, oznaci obvestilo kot prebrano in ga izbrisi.
+8. Priakovani rezultat: organizatorske PWA spremembe ne zlomijo osnovnega uporabniskega toka.
+
+Končni kriterij:
+Vsi scenariji A-I morajo biti izvedljivi brez spremembe kode med testom. Ce kateri korak pade, se v porocilo zapise korak, pricakovani rezultat, dejanski rezultat in popravek.

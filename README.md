@@ -233,6 +233,26 @@ GET  /api/push/messages
 
 Service worker vsebuje tudi `push` event listener. Ker projekt ne uporablja zunanjega Web Push ponudnika, aplikacija push sporočila pripravi prek REST endpointov, jih prevzame ob sinhronizaciji in jih preko service workerja prikaže kot sistemska obvestila.
 
+### Rocno testiranje PWA tokov
+
+Za PWA je pripravljen rocni testni dokument:
+
+```text
+texts/testni-scenarij-clan4.txt
+```
+
+Dokument pokriva:
+
+- PWA installability in registracijo service workerja,
+- offline reload aplikacijske lupine,
+- localStorage queue in sinhronizacijo po reconnectu,
+- organizatorski create/edit/delete tok,
+- pregled prijav, statistiko, QR in CSV izvoz,
+- push subscribe/send/messages tok,
+- responsive in accessibility smoke test,
+- preverjanje glasovnih ukazov po integraciji,
+- preverjanje, da uporabniski tok ostane delujoc.
+
 ## Upravljanje z mikrofonom
 
 Za to nalogo ni bila dodana zunanja npm knjiznica, ampak so bili uporabljeni vgrajeni brskalniški API-ji:

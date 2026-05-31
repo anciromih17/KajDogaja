@@ -453,10 +453,18 @@ body:not([data-role]) .event-register { display: none; }
 }
 
 .register-btn.registered {
-    background: var(--accent-soft);
-    border-color: var(--accent-strong);
-    color: var(--accent-strong);
-    cursor: default;
+    background: #ecfdf5;
+    border-color: #bbf7d0;
+    color: #166534;
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
+}
+
+.register-btn.registered:hover {
+    background: #ecfdf5;
+    border-color: #bbf7d0;
+    color: #166534;
     box-shadow: none;
     transform: none;
 }

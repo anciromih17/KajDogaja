@@ -102,6 +102,7 @@ let state = {
     isListening: false,
     voiceSupported: false,
     pendingRegister: null,
+    registeredEventIds: new Set(),
     currentUserId: null,
     currentUserRole: null,
     organizerDetailEventId: null,
@@ -393,6 +394,7 @@ function renderEvents(events) {
         const capacity = event.kapaciteta || 0;
         const occupancy = capacity ? Math.min(Math.round((registrations / capacity) * 100), 100) : 0;
         const qrSrc = event.qr_koda_url || '';
+        const isRegistered = state.registeredEventIds.has(event.id);
         const card = document.createElement('article');
         card.className = 'event-card';
         card.innerHTML = `
@@ -427,7 +429,9 @@ function renderEvents(events) {
                     <button type="button" class="danger" data-action="delete" data-id="${event.id}">Izbriši</button>
                 </div>
                 <div class="event-register">
-                    <button type="button" class="register-btn" data-action="register" data-id="${event.id}">Prijavi se</button>
+                    <button type="button" class="register-btn${isRegistered ? ' registered' : ''}" data-action="register" data-id="${event.id}" ${isRegistered ? 'disabled aria-disabled="true" title="Na ta dogodek si že prijavljen."' : ''}>
+                        ${isRegistered ? 'Prijavljen' : 'Prijavi se'}
+                    </button>
                 </div>
             </div>
             <div class="event-bottom">
@@ -793,8 +797,10 @@ async function loadMyRegistrations() {
 
     try {
         const registrations = await apiRequest('/me/registrations');
+        state.registeredEventIds = new Set(registrations.map((reg) => reg.dogodek?.id).filter(Boolean));
         elements.myRegistrationsCount.textContent = registrations.length;
         elements.myRegistrationsCount.hidden = registrations.length === 0;
+        renderEvents(state.events);
 
         if (registrations.length === 0) {
             elements.myRegistrationsList.innerHTML = '<p class="muted">Nisi prijavljen na noben dogodek.</p>';
@@ -856,6 +862,11 @@ async function loadNotifications() {
 }
 
 function showRegisterConfirm(eventId, btn) {
+    if (state.registeredEventIds.has(eventId)) {
+        toast('Na ta dogodek si že prijavljen.');
+        return;
+    }
+
     const event = state.events.find(e => e.id === eventId);
     if (!event) return;
 
@@ -876,8 +887,10 @@ async function registerForEvent(eventId, btn) {
     try {
         await apiRequest(`/events/${eventId}/registrations`, { method: 'POST' });
         notify('Prijava uspešna', 'Uspešno si se prijavil na dogodek.');
+        state.registeredEventIds.add(eventId);
         btn.textContent = 'Prijavljen ✓';
         btn.classList.add('registered');
+        btn.disabled = true;
         await loadMyRegistrations();
         await loadEvents();
     } catch (err) {
@@ -891,6 +904,7 @@ async function unregisterFromEvent(eventId) {
     try {
         await apiRequest(`/events/${eventId}/registrations`, { method: 'DELETE' });
         notify('Odjava uspešna', 'Uspešno si se odjavil od dogodka.');
+        state.registeredEventIds.delete(eventId);
         await loadMyRegistrations();
         await loadEvents();
     } catch (error) {

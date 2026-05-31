@@ -58,7 +58,7 @@ To je treba se doreci ali izboljsati, da bo projekt skladen z zacetno skupinsko 
 
 **Naloge:**
 
-- [ ] analiziraj vse trenutne entitete:
+- [x] analiziraj vse trenutne entitete:
   - `users`
   - `events`
   - `categories`
@@ -68,16 +68,16 @@ To je treba se doreci ali izboljsati, da bo projekt skladen z zacetno skupinsko 
   - `oauthRefreshTokens`
   - `pushSubscriptions`
   - `pushMessages`
-- [ ] pripravi predlog prave baze:
+- [x] pripravi predlog prave baze:
   - MongoDB + Mongoose ali
   - PostgreSQL + Prisma
 - [ ] naredi migracijo iz `data/db.json` na izbrano bazo
-- [ ] pripravi seed podatke za demo okolje
-- [ ] posodobi vse obstojece endpoint-e, da uporabljajo novo plast za branje/pisanje
-- [ ] ohrani enak API response shape, da frontend ostane cim bolj zdruzljiv
-- [ ] pripravi centralni error handling za delo z bazo
-- [ ] doda osnovno validacijo in integrity checks na nivoju modelov
-- [ ] preveri in utrdi:
+- [x] pripravi seed podatke za demo okolje
+- [x] posodobi vse obstojece endpoint-e, da uporabljajo novo plast za branje/pisanje
+- [x] ohrani enak API response shape, da frontend ostane cim bolj zdruzljiv
+- [x] pripravi centralni error handling za delo z bazo
+- [x] doda osnovno validacijo in integrity checks na nivoju modelov
+- [x] preveri in utrdi:
   - QR generiranje
   - statistiko
   - push endpointe
@@ -106,17 +106,17 @@ To je treba se doreci ali izboljsati, da bo projekt skladen z zacetno skupinsko 
 
 **Naloge:**
 
-- [ ] pripravi login zaslon
-- [ ] pripravi register zaslon
-- [ ] dodaj preklop med vlogama `uporabnik` in `organizator` pri registraciji
-- [ ] uredi shranjevanje in odjavo uporabnika v PWA
-- [ ] odstrani trdo vezan demo organizer login za glavni flow aplikacije
-- [ ] pripravi pogled `Moj profil`
-- [ ] pripravi pogled `Moje prijave`
-- [ ] pripravi pogled `Obvestila`
-- [ ] dodaj oznacevanje obvestil kot prebranih
-- [ ] dodaj brisanje obvestil
-- [ ] povezi vse z obstoječimi endpointi:
+- [x] pripravi login zaslon
+- [x] pripravi register zaslon
+- [x] dodaj preklop med vlogama `uporabnik` in `organizator` pri registraciji
+- [x] uredi shranjevanje in odjavo uporabnika v PWA
+- [x] odstrani trdo vezan demo organizer login za glavni flow aplikacije
+- [x] pripravi pogled `Moj profil`
+- [x] pripravi pogled `Moje prijave`
+- [x] pripravi pogled `Obvestila`
+- [x] dodaj oznacevanje obvestil kot prebranih
+- [x] dodaj brisanje obvestil
+- [x] povezi vse z obstoječimi endpointi:
   - `/api/auth/register`
   - `/api/auth/login`
   - `/api/oauth/token`
@@ -148,22 +148,22 @@ To je treba se doreci ali izboljsati, da bo projekt skladen z zacetno skupinsko 
 
 **Naloge:**
 
-- [ ] izboljsaj seznam dogodkov
-- [ ] naredi poseben pogled ali modal za podrobnosti dogodka
-- [ ] izboljsaj filtre:
+- [x] izboljsaj seznam dogodkov
+- [x] naredi poseben pogled ali modal za podrobnosti dogodka
+- [x] izboljsaj filtre:
   - mesto
   - datum / datum od-do
   - kategorija
   - text search
-- [ ] dodaj uporabo geolokacije:
+- [x] dodaj uporabo geolokacije:
   - gumb `Dogodki v blizini`
   - pridobitev `navigator.geolocation`
   - klic `/api/events?lat=...&lng=...&radius=...`
-- [ ] pripravi map view za dogodke
-- [ ] prikazi markerje na mapi glede na koordinate dogodkov
-- [ ] omogoci preklop `seznam / mapa`
-- [ ] pripravi QR skeniranje s kamero
-- [ ] ob uspešnem skenu odpri podrobnosti dogodka
+- [x] pripravi map view za dogodke
+- [x] prikazi markerje na mapi glede na koordinate dogodkov
+- [x] omogoci preklop `seznam / mapa`
+- [x] pripravi QR skeniranje s kamero
+- [x] ob uspešnem skenu odpri podrobnosti dogodka
 
 **Priporocena knjiznica:**
 
@@ -196,30 +196,30 @@ To je treba se doreci ali izboljsati, da bo projekt skladen z zacetno skupinsko 
 
 **Naloge - organizatorski del:**
 
-- [ ] izboljsaj create/edit/delete flow za dogodke
-- [ ] pripravi organizatorski pregled lastnih dogodkov
-- [ ] pripravi pogled za seznam prijavljenih uporabnikov po dogodku
-- [ ] pripravi pogled za statistiko po dogodku
-- [ ] pripravi lep prikaz QR kode dogodka
-- [ ] dodaj moznost filtriranja dogodkov organizatorja
-- [ ] po moznosti dodaj export prijav (CSV ali JSON download)
+- [x] izboljsaj create/edit/delete flow za dogodke
+- [x] pripravi organizatorski pregled lastnih dogodkov
+- [x] pripravi pogled za seznam prijavljenih uporabnikov po dogodku
+- [x] pripravi pogled za statistiko po dogodku
+- [x] pripravi lep prikaz QR kode dogodka
+- [x] dodaj moznost filtriranja dogodkov organizatorja
+- [x] po moznosti dodaj export prijav (CSV ali JSON download)
 
 **Naloge - PWA/platformni del:**
 
-- [ ] utrdi offline delovanje:
+- [x] utrdi offline delovanje:
   - reload offline
   - queue sync
   - recovery po reconnect
-- [ ] preveri in dopolni service worker cache strategijo
-- [ ] utrdi push tok:
+- [x] preveri in dopolni service worker cache strategijo
+- [x] utrdi push tok:
   - subscribe
   - prevzem sporocil
   - prikaz sistemskih obvestil
-- [ ] preveri manifest in installability
-- [ ] preveri responsive delovanje
+- [x] preveri manifest in installability
+- [x] preveri responsive delovanje
 - [ ] preveri accessibility in splosni polish
-- [ ] preveri, da glasovno upravljanje ostane delujoce po vseh integracijah
-- [ ] pripravi zakljucni testni scenarij za zagovor
+- [x] preveri, da glasovno upravljanje ostane delujoce po vseh integracijah
+- [x] pripravi zakljucni testni scenarij za zagovor
 
 **API, ki ga uporablja:**
 
@@ -248,33 +248,33 @@ To je treba se doreci ali izboljsati, da bo projekt skladen z zacetno skupinsko 
 
 To so “checklist” točke za končno verzijo:
 
-- [ ] registracija
-- [ ] prijava
-- [ ] odjava
-- [ ] prikaz vseh dogodkov
-- [ ] filtriranje po mestu
-- [ ] filtriranje po datumu
-- [ ] filtriranje po kategoriji
-- [ ] iskanje po nazivu/opisu
-- [ ] podrobnosti dogodka
-- [ ] prijava na dogodek
-- [ ] odjava z dogodka
-- [ ] moje prijave
-- [ ] obvestila
-- [ ] dogodki v blizini
-- [ ] offline dostop
-- [ ] QR generiranje
-- [ ] QR skeniranje
-- [ ] prikaz dogodkov na mapi
-- [ ] dodajanje dogodka
-- [ ] urejanje dogodka
-- [ ] brisanje dogodka
-- [ ] pregled prijavljenih uporabnikov
-- [ ] statistika prijav
-- [ ] push obvestila
-- [ ] PWA manifest in installability
-- [ ] service worker cache
-- [ ] glasovno upravljanje naj ostane delujoce tudi po integraciji
+- [x] registracija
+- [x] prijava
+- [x] odjava
+- [x] prikaz vseh dogodkov
+- [x] filtriranje po mestu
+- [x] filtriranje po datumu
+- [x] filtriranje po kategoriji
+- [x] iskanje po nazivu/opisu
+- [x] podrobnosti dogodka
+- [x] prijava na dogodek
+- [x] odjava z dogodka
+- [x] moje prijave
+- [x] obvestila
+- [x] dogodki v blizini
+- [x] offline dostop
+- [x] QR generiranje
+- [x] QR skeniranje
+- [x] prikaz dogodkov na mapi
+- [x] dodajanje dogodka
+- [x] urejanje dogodka
+- [x] brisanje dogodka
+- [x] pregled prijavljenih uporabnikov
+- [x] statistika prijav
+- [x] push obvestila
+- [x] PWA manifest in installability
+- [x] service worker cache
+- [x] glasovno upravljanje naj ostane delujoce tudi po integraciji
 
 ## 5. Faze dela
 
@@ -282,22 +282,22 @@ Najbolj varno je projekt razvijati v fazah.
 
 ### Faza 1 - stabilizacija osnove
 
-- [ ] Clan 1 postavi bazo / data layer
-- [ ] Clan 2 pripravi login/register flow
-- [ ] Clan 3 dela discovery UI nad obstoječimi endpointi
-- [ ] Clan 4 pripravi organizatorski UI skeleton in PWA testne scenarije
+- [x] Clan 1 postavi bazo / data layer
+- [x] Clan 2 pripravi login/register flow
+- [x] Clan 3 dela discovery UI nad obstoječimi endpointi
+- [x] Clan 4 pripravi organizatorski UI skeleton in PWA testne scenarije
 
 ### Faza 2 - jedrni uporabniski in organizatorski tokovi
 
-- [ ] Clan 2 dokonca profil, moje prijave in obvestila
-- [ ] Clan 3 dokonca filtre, detail view in geolocation
-- [ ] Clan 4 dokonca create/edit/delete organizer flow + registrations/stats
+- [x] Clan 2 dokonca profil, moje prijave in obvestila
+- [x] Clan 3 dokonca filtre, detail view in geolocation
+- [x] Clan 4 dokonca create/edit/delete organizer flow + registrations/stats
 
 ### Faza 3 - napredne funkcionalnosti
 
-- [ ] Clan 3 dokonca mapo in QR skeniranje
-- [ ] Clan 4 dokonca push, offline hardening in finalni polish
-- [ ] Clan 1 pomaga pri backend podpori, ce kdo naleti na vrzel v API-ju
+- [x] Clan 3 dokonca mapo in QR skeniranje
+- [x] Clan 4 dokonca push, offline hardening in finalni polish
+- [x] Clan 1 pomaga pri backend podpori, ce kdo naleti na vrzel v API-ju
 
 ### Faza 4 - integracija
 
