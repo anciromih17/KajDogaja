@@ -469,6 +469,25 @@ body:not([data-role]) .event-register { display: none; }
     transform: none;
 }
 
+.register-btn.full {
+    background: #fff7ed;
+    border-color: #fed7aa;
+    color: #9a3412;
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
+}
+
+.register-btn.loading,
+.registration-card.loading {
+    opacity: 0.72;
+    pointer-events: none;
+}
+
+.icon-button.loading svg {
+    animation: spin 0.9s linear infinite;
+}
+
 .stats-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -763,6 +782,58 @@ body[data-role="organizator"] .platform-panel {
     box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
 }
 
+.skeleton-card {
+    pointer-events: none;
+}
+
+.skeleton-line,
+.skeleton-chips span,
+.skeleton-bar,
+.skeleton-actions span {
+    display: block;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #edf2f4 0%, #f8fafc 45%, #edf2f4 100%);
+    background-size: 220% 100%;
+    animation: shimmer 1.2s ease-in-out infinite;
+}
+
+.skeleton-line {
+    width: 70%;
+    height: 18px;
+    margin-bottom: 12px;
+}
+
+.skeleton-line.title {
+    width: 36%;
+    height: 24px;
+}
+
+.skeleton-chips,
+.skeleton-actions {
+    display: flex;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.skeleton-chips span {
+    width: 110px;
+    height: 28px;
+}
+
+.skeleton-bar {
+    height: 8px;
+    margin: 12px 0 18px;
+}
+
+.skeleton-actions {
+    justify-content: flex-end;
+}
+
+.skeleton-actions span {
+    width: 92px;
+    height: 38px;
+}
+
 .event-card h3 {
     margin-bottom: 8px;
     font-size: 1.05rem;
@@ -779,6 +850,33 @@ body[data-role="organizator"] .platform-panel {
     min-width: 0;
 }
 
+.event-state-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 0;
+}
+
+.status-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    border-radius: 999px;
+    padding: 3px 8px;
+    font-size: 0.74rem;
+    font-weight: 850;
+}
+
+.status-chip.success {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.status-chip.full {
+    background: #ffedd5;
+    color: #9a3412;
+}
+
 .occupancy-pill {
     flex: 0 0 auto;
     border-radius: 999px;
@@ -787,6 +885,11 @@ body[data-role="organizator"] .platform-panel {
     color: var(--accent-strong);
     font-size: 0.82rem;
     font-weight: 850;
+}
+
+.occupancy-pill.full {
+    background: #ffedd5;
+    color: #9a3412;
 }
 
 .event-meta {
@@ -1085,6 +1188,15 @@ form {
     border: 1px solid var(--line);
     border-radius: 8px;
     background: #ffffff;
+}
+
+@keyframes shimmer {
+    from { background-position: 120% 0; }
+    to { background-position: -120% 0; }
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
 }
 
 

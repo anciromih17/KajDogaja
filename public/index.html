@@ -7,7 +7,7 @@
     <title>KajDogaja</title>
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/pwa/styles.css?v=25">
+    <link rel="stylesheet" href="/pwa/styles.css?v=26">
     <link rel="stylesheet" href="/pwa/auth.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 </head>
@@ -251,6 +251,10 @@
                         <h2>Dogodki</h2>
                         <div class="list-head-actions">
                             <span id="eventCount" class="muted">0</span>
+                            <button id="refreshEventsButton" type="button" class="ghost icon-button">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.1 6.7M5.8 15A7 7 0 0 0 17.9 17.3"/></svg>
+                                Osveži
+                            </button>
                             <button id="qrScanButton" type="button" class="ghost icon-button">
                                 <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h2v2h-2zM18 14h3M14 18h3M20 18h1M18 20h3"/></svg>
                                 Skeniraj QR
@@ -529,6 +533,27 @@
         </div>
     </div>
 
+    <!-- Odjava z dogodka -->
+    <div id="unregisterConfirmOverlay" class="modal-overlay" hidden>
+        <div class="modal-card">
+            <div class="modal-head">
+                <h3>Potrdi odjavo</h3>
+                <button id="closeUnregisterConfirm" type="button" class="ghost icon-button" style="padding:6px;">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <p style="margin:0;color:var(--muted);font-size:0.875rem;">Odjaviti se želiš z dogodka:</p>
+            <div id="unregisterConfirmDetails" class="confirm-event-details"></div>
+            <div class="two-col" style="margin-top:4px;">
+                <button type="button" id="cancelUnregisterConfirm" class="ghost icon-button">Prekliči</button>
+                <button type="button" id="confirmUnregisterBtn" class="danger icon-button">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                    Odjavi se
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Organizatorske podrobnosti -->
     <div id="organizerDetailOverlay" class="modal-overlay" hidden>
         <div class="modal-card modal-card-wide">
@@ -574,6 +599,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
     <script src="/pwa/auth.js" defer></script>
-    <script src="/pwa/app.js?v=25" defer></script>
+    <script src="/pwa/app.js?v=26" defer></script>
 </body>
 </html>

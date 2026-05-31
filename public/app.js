@@ -9,7 +9,8 @@ const STORE_KEYS = {
     categories: 'kajdogaja_pwa_categories',
     cities: 'kajdogaja_pwa_cities',
     queue: 'kajdogaja_pwa_queue',
-    platform: 'kajdogaja_pwa_platform'
+    platform: 'kajdogaja_pwa_platform',
+    registrations: 'kajdogaja_pwa_registrations'
 };
 
 const elements = {
@@ -26,6 +27,7 @@ const elements = {
     voiceTranscript: document.getElementById('voiceTranscript'),
     eventsList: document.getElementById('eventsList'),
     eventCount: document.getElementById('eventCount'),
+    refreshEventsButton: document.getElementById('refreshEventsButton'),
     openEventFormButton: document.getElementById('openEventFormButton'),
     eventFormOverlay: document.getElementById('eventFormOverlay'),
     closeEventFormButton: document.getElementById('closeEventFormButton'),
@@ -102,7 +104,10 @@ let state = {
     isListening: false,
     voiceSupported: false,
     pendingRegister: null,
+    pendingUnregister: null,
     registeredEventIds: new Set(),
+    loadingEventIds: new Set(),
+    eventsLoading: false,
     currentUserId: null,
     currentUserRole: null,
     organizerDetailEventId: null,
@@ -137,6 +142,51 @@ function escapeHtml(value) {
 
 function csvEscape(value) {
     return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+function getFriendlyError(error, fallback = 'Dejanje trenutno ni uspelo. Poskusi znova čez trenutek.') {
+    const message = String(error?.message || error || '').toLowerCase();
+    if (message.includes('ze prijavljen') || message.includes('že prijavljen')) {
+        return 'Na ta dogodek si že prijavljen.';
+    }
+    if (message.includes('poln')) {
+        return 'Dogodek je poln, zato prijava ni več mogoča.';
+    }
+    if (message.includes('manjka oauth') || message.includes('401') || message.includes('neveljaven')) {
+        return 'Seja je potekla. Ponovno se prijavi in poskusi še enkrat.';
+    }
+    if (message.includes('failed to fetch') || message.includes('network') || message.includes('povezava')) {
+        return 'Ni povezave s strežnikom. Spremembe lahko poskusiš znova, ko boš online.';
+    }
+    if (message.includes('prijava ne obstaja')) {
+        return 'Ta prijava ni več aktivna.';
+    }
+    return error?.message || fallback;
+}
+
+function setEventsLoading(isLoading) {
+    state.eventsLoading = isLoading;
+    if (elements.refreshEventsButton) {
+        elements.refreshEventsButton.disabled = isLoading;
+        elements.refreshEventsButton.classList.toggle('loading', isLoading);
+    }
+}
+
+function renderEventSkeletons(count = 3) {
+    elements.eventCount.textContent = 'Nalagam ...';
+    elements.eventsList.innerHTML = Array.from({ length: count }, () => `
+        <article class="event-card skeleton-card" aria-hidden="true">
+            <div class="skeleton-line title"></div>
+            <div class="skeleton-line"></div>
+            <div class="skeleton-chips">
+                <span></span><span></span><span></span>
+            </div>
+            <div class="skeleton-bar"></div>
+            <div class="skeleton-actions">
+                <span></span><span></span><span></span>
+            </div>
+        </article>
+    `).join('');
 }
 
 function updateStats() {
@@ -359,6 +409,8 @@ function queryString() {
 }
 
 async function loadEvents() {
+    setEventsLoading(true);
+    renderEventSkeletons();
     try {
         const events = await apiRequest(`/events${queryString()}`, { auth: false });
         state.events = events;
@@ -374,6 +426,16 @@ async function loadEvents() {
         renderMap(cached);
         updateStats();
         notify('Napaka', 'Povezava ni na voljo. Prikazani so lokalno shranjeni dogodki.');
+    } finally {
+        setEventsLoading(false);
+    }
+}
+
+async function refreshEvents() {
+    toast('Osvežujem dogodke ...');
+    await loadEvents();
+    if (state.currentUserRole === 'uporabnik') {
+        await loadMyRegistrations();
     }
 }
 
@@ -395,12 +457,27 @@ function renderEvents(events) {
         const occupancy = capacity ? Math.min(Math.round((registrations / capacity) * 100), 100) : 0;
         const qrSrc = event.qr_koda_url || '';
         const isRegistered = state.registeredEventIds.has(event.id);
+        const isFull = Boolean(capacity && registrations >= capacity);
+        const isLoading = state.loadingEventIds.has(event.id);
+        const registerDisabled = isRegistered || isFull || isLoading;
+        const registerLabel = isLoading ? 'Pošiljam ...' : isRegistered ? 'Prijavljen' : isFull ? 'Dogodek je poln' : 'Prijavi se';
+        const registerTitle = isRegistered
+            ? 'Na ta dogodek si že prijavljen.'
+            : isFull
+                ? 'Kapaciteta dogodka je zapolnjena.'
+                : 'Prijavi se na dogodek.';
         const card = document.createElement('article');
         card.className = 'event-card';
         card.innerHTML = `
             <div class="event-card-head">
-                <h3>${escapeHtml(event.naziv)}</h3>
-                <span class="occupancy-pill">${registrations}/${capacity || '-'}</span>
+                <div>
+                    <h3>${escapeHtml(event.naziv)}</h3>
+                    <div class="event-state-row">
+                        ${isRegistered ? '<span class="status-chip success">Moja prijava</span>' : ''}
+                        ${isFull ? '<span class="status-chip full">Polno</span>' : ''}
+                    </div>
+                </div>
+                <span class="occupancy-pill${isFull ? ' full' : ''}">${registrations}/${capacity || '-'}</span>
             </div>
             <p>${escapeHtml(event.opis)}</p>
             <div class="event-meta">
@@ -429,8 +506,8 @@ function renderEvents(events) {
                     <button type="button" class="danger" data-action="delete" data-id="${event.id}">Izbriši</button>
                 </div>
                 <div class="event-register">
-                    <button type="button" class="register-btn${isRegistered ? ' registered' : ''}" data-action="register" data-id="${event.id}" ${isRegistered ? 'disabled aria-disabled="true" title="Na ta dogodek si že prijavljen."' : ''}>
-                        ${isRegistered ? 'Prijavljen' : 'Prijavi se'}
+                    <button type="button" class="register-btn${isRegistered ? ' registered' : ''}${isFull ? ' full' : ''}${isLoading ? ' loading' : ''}" data-action="register" data-id="${event.id}" ${registerDisabled ? 'disabled aria-disabled="true"' : ''} title="${escapeHtml(registerTitle)}">
+                        ${escapeHtml(registerLabel)}
                     </button>
                 </div>
             </div>
@@ -790,6 +867,34 @@ async function openEventStats(eventId) {
     }
 }
 
+function applyRegistrations(registrations) {
+    state.registeredEventIds = new Set(registrations.map((reg) => reg.dogodek?.id).filter(Boolean));
+    elements.myRegistrationsCount.textContent = registrations.length;
+    elements.myRegistrationsCount.hidden = registrations.length === 0;
+    renderEvents(state.events);
+
+    if (registrations.length === 0) {
+        elements.myRegistrationsList.innerHTML = '<p class="muted">Nisi prijavljen na noben dogodek.</p>';
+        return;
+    }
+
+    elements.myRegistrationsList.innerHTML = registrations.map(reg => {
+        const e = reg.dogodek;
+        const date = getEventDateLabel(e);
+        const isLoading = state.loadingEventIds.has(e.id);
+        return `<div class="registration-card${isLoading ? ' loading' : ''}">
+            <div class="registration-info">
+                <strong>${escapeHtml(e.naziv)}</strong>
+                <span>${escapeHtml(date)} · ${escapeHtml(e.mesto?.naziv || '-')} · ${escapeHtml(e.kategorija?.naziv || '-')}</span>
+            </div>
+            <button class="ghost icon-button" data-unregister="${e.id}" title="Odjavi se" ${isLoading ? 'disabled' : ''}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                ${isLoading ? 'Odjavljam ...' : 'Odjavi se'}
+            </button>
+        </div>`;
+    }).join('');
+}
+
 async function loadMyRegistrations() {
     if (state.currentUserRole === 'organizator') {
         return loadOrganizerStats();
@@ -797,32 +902,18 @@ async function loadMyRegistrations() {
 
     try {
         const registrations = await apiRequest('/me/registrations');
-        state.registeredEventIds = new Set(registrations.map((reg) => reg.dogodek?.id).filter(Boolean));
-        elements.myRegistrationsCount.textContent = registrations.length;
-        elements.myRegistrationsCount.hidden = registrations.length === 0;
-        renderEvents(state.events);
-
-        if (registrations.length === 0) {
-            elements.myRegistrationsList.innerHTML = '<p class="muted">Nisi prijavljen na noben dogodek.</p>';
+        writeStore(STORE_KEYS.registrations, registrations);
+        applyRegistrations(registrations);
+    } catch (error) {
+        const cached = readStore(STORE_KEYS.registrations, []);
+        if (cached.length) {
+            applyRegistrations(cached);
+            toast('Prijave so prikazane iz lokalne shrambe.');
             return;
         }
-
-        elements.myRegistrationsList.innerHTML = registrations.map(reg => {
-            const e = reg.dogodek;
-            const date = getEventDateLabel(e);
-            return `<div class="registration-card">
-                <div class="registration-info">
-                    <strong>${escapeHtml(e.naziv)}</strong>
-                    <span>${escapeHtml(date)} · ${escapeHtml(e.mesto?.naziv || '-')} · ${escapeHtml(e.kategorija?.naziv || '-')}</span>
-                </div>
-                <button class="ghost icon-button" data-unregister="${e.id}" title="Odjavi se">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
-                    Odjavi se
-                </button>
-            </div>`;
-        }).join('');
-    } catch {
-        elements.myRegistrationsList.innerHTML = '<p class="muted">Napaka pri nalaganju prijav.</p>';
+        state.registeredEventIds = new Set();
+        renderEvents(state.events);
+        elements.myRegistrationsList.innerHTML = `<p class="muted">${escapeHtml(getFriendlyError(error, 'Napaka pri nalaganju prijav.'))}</p>`;
     }
 }
 
@@ -866,8 +957,12 @@ function showRegisterConfirm(eventId, btn) {
         toast('Na ta dogodek si že prijavljen.');
         return;
     }
-
     const event = state.events.find(e => e.id === eventId);
+    if (event?.kapaciteta && (event.st_prijav || 0) >= event.kapaciteta) {
+        toast('Dogodek je poln, zato prijava ni več mogoča.', 'error');
+        return;
+    }
+
     if (!event) return;
 
     const dateLabel = getEventDateLabel(event);
@@ -880,8 +975,26 @@ function showRegisterConfirm(eventId, btn) {
     document.getElementById('registerConfirmOverlay').hidden = false;
 }
 
+function showUnregisterConfirm(eventId) {
+    const event = state.events.find(e => e.id === eventId);
+    const registration = readStore(STORE_KEYS.registrations, []).find((reg) => reg.dogodek?.id === eventId);
+    const item = event || registration?.dogodek;
+    if (!item) return;
+
+    document.getElementById('unregisterConfirmDetails').innerHTML = `
+        <strong>${escapeHtml(item.naziv)}</strong>
+        <span>${escapeHtml(getEventDateLabel(item))} ob ${escapeHtml(item.ura || '-')}</span>
+        <span>${escapeHtml(item.lokacija || item.mesto?.naziv || '')}</span>
+    `;
+    state.pendingUnregister = { eventId };
+    document.getElementById('unregisterConfirmOverlay').hidden = false;
+}
+
 async function registerForEvent(eventId, btn) {
+    if (state.loadingEventIds.has(eventId)) return;
     const prev = btn.textContent;
+    state.loadingEventIds.add(eventId);
+    renderEvents(state.events);
     btn.disabled = true;
     btn.textContent = '...';
     try {
@@ -894,13 +1007,20 @@ async function registerForEvent(eventId, btn) {
         await loadMyRegistrations();
         await loadEvents();
     } catch (err) {
-        notify('Napaka', err.message, 'error');
+        notify('Napaka', getFriendlyError(err));
         btn.disabled = false;
         btn.textContent = prev;
+    } finally {
+        state.loadingEventIds.delete(eventId);
+        renderEvents(state.events);
     }
 }
 
 async function unregisterFromEvent(eventId) {
+    if (state.loadingEventIds.has(eventId)) return;
+    state.loadingEventIds.add(eventId);
+    renderEvents(state.events);
+    applyRegistrations(readStore(STORE_KEYS.registrations, []));
     try {
         await apiRequest(`/events/${eventId}/registrations`, { method: 'DELETE' });
         notify('Odjava uspešna', 'Uspešno si se odjavil od dogodka.');
@@ -908,7 +1028,10 @@ async function unregisterFromEvent(eventId) {
         await loadMyRegistrations();
         await loadEvents();
     } catch (error) {
-        notify('Napaka', error.message, 'error');
+        notify('Napaka', getFriendlyError(error));
+    } finally {
+        state.loadingEventIds.delete(eventId);
+        renderEvents(state.events);
     }
 }
 
@@ -1668,6 +1791,7 @@ function bindEvents() {
     });
     elements.categoryFilter.addEventListener('change', loadEvents);
     elements.cityFilter.addEventListener('change', loadEvents);
+    elements.refreshEventsButton?.addEventListener('click', refreshEvents);
     elements.resetFormButton.addEventListener('click', resetForm);
     elements.openEventFormButton?.addEventListener('click', openNewEventForm);
     elements.closeEventFormButton?.addEventListener('click', closeEventForm);
@@ -1788,10 +1912,29 @@ function bindEvents() {
 
     elements.myRegistrationsList.addEventListener('click', async (e) => {
         const btn = e.target.closest('[data-unregister]');
-        if (btn) await unregisterFromEvent(btn.dataset.unregister);
+        if (btn) {
+            showUnregisterConfirm(btn.dataset.unregister);
+            return;
+        }
         const actionBtn = e.target.closest('button[data-action]');
         if (!actionBtn) return;
         if (actionBtn.dataset.action === 'registrations') await openEventRegistrations(actionBtn.dataset.id);
+    });
+
+    const closeUnregisterConfirm = () => {
+        document.getElementById('unregisterConfirmOverlay').hidden = true;
+        state.pendingUnregister = null;
+    };
+
+    document.getElementById('closeUnregisterConfirm')?.addEventListener('click', closeUnregisterConfirm);
+    document.getElementById('cancelUnregisterConfirm')?.addEventListener('click', closeUnregisterConfirm);
+    document.getElementById('unregisterConfirmOverlay')?.addEventListener('click', (e) => {
+        if (e.target === document.getElementById('unregisterConfirmOverlay')) closeUnregisterConfirm();
+    });
+    document.getElementById('confirmUnregisterBtn')?.addEventListener('click', async () => {
+        const pending = state.pendingUnregister;
+        closeUnregisterConfirm();
+        if (pending) await unregisterFromEvent(pending.eventId);
     });
 
     document.getElementById('closeOrganizerDetail')?.addEventListener('click', closeOrganizerDetail);
