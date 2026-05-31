@@ -1305,3 +1305,126 @@ form {
         width: fit-content;
     }
 }
+
+/* ── Clan 3: geo bar ─────────────────────────────────────────────────────── */
+
+.geo-bar {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.geo-bar label {
+    min-width: 110px;
+    flex: 0 0 auto;
+}
+
+#nearbyButton.geo-active {
+    background: #111827;
+    border-color: #111827;
+    color: #ffffff;
+}
+
+/* ── Clan 3: view toggle (seznam / mapa) ─────────────────────────────────── */
+
+.view-toggle {
+    display: flex;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.view-toggle button {
+    min-height: 36px;
+    padding: 6px 14px;
+    border: none;
+    border-radius: 0;
+    background: #ffffff;
+    color: var(--muted);
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.view-toggle button:hover {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    transform: none;
+}
+
+.view-toggle button.active {
+    background: var(--accent);
+    color: #ffffff;
+}
+
+.view-toggle button.active:hover {
+    background: var(--accent-strong);
+    transform: none;
+}
+
+/* ── Clan 3: map container ───────────────────────────────────────────────── */
+
+#eventsMap {
+    height: 500px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    margin-top: 0;
+}
+
+/* ── Clan 3: event card detail button ────────────────────────────────────── */
+
+.event-bottom {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+}
+
+/* ── Clan 3: event detail modal ──────────────────────────────────────────── */
+
+.event-detail-desc {
+    color: var(--muted);
+    line-height: 1.55;
+    margin-bottom: 12px;
+}
+
+.event-detail-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.event-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+/* ── Clan 3: QR scanner modal ────────────────────────────────────────────── */
+
+.qr-scanner-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+#qrScannerContainer {
+    width: 100%;
+    min-height: 280px;
+}
+
+@media (max-width: 560px) {
+    .geo-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .view-toggle {
+        width: fit-content;
+    }
+}

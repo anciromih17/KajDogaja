@@ -76,7 +76,20 @@ const elements = {
     profileEditError: document.getElementById('profileEditError'),
     myRegistrationsList: document.getElementById('myRegistrationsList'),
     myRegistrationsCount: document.getElementById('myRegistrationsCount'),
-    toastHost: document.getElementById('toastHost')
+    toastHost: document.getElementById('toastHost'),
+    dateFromInput: document.getElementById('dateFromInput'),
+    dateToInput: document.getElementById('dateToInput'),
+    nearbyButton: document.getElementById('nearbyButton'),
+    clearGeoButton: document.getElementById('clearGeoButton'),
+    geoRadiusSelect: document.getElementById('geoRadiusSelect'),
+    listViewBtn: document.getElementById('listViewBtn'),
+    mapViewBtn: document.getElementById('mapViewBtn'),
+    eventsMap: document.getElementById('eventsMap'),
+    qrScanButton: document.getElementById('qrScanButton'),
+    qrScannerOverlay: document.getElementById('qrScannerOverlay'),
+    eventDetailOverlay: document.getElementById('eventDetailOverlay'),
+    eventDetailTitle: document.getElementById('eventDetailTitle'),
+    eventDetailBody: document.getElementById('eventDetailBody')
 };
 
 let state = {
@@ -91,7 +104,15 @@ let state = {
     pendingRegister: null,
     currentUserId: null,
     currentUserRole: null,
-    organizerDetailEventId: null
+    organizerDetailEventId: null,
+    geoActive: false,
+    geoLat: null,
+    geoLng: null,
+    geoRadius: 10,
+    mapView: false,
+    leafletMap: null,
+    mapMarkers: [],
+    qrScanner: null
 };
 
 function readStore(key, fallback) {
@@ -322,6 +343,16 @@ function queryString() {
     if (elements.cityFilter.value) {
         params.set('city', elements.cityFilter.value);
     }
+    const dateFrom = elements.dateFromInput?.value;
+    const dateTo = elements.dateToInput?.value;
+    if (dateFrom || dateTo) {
+        params.set('date', `${dateFrom || dateTo},${dateTo || dateFrom}`);
+    }
+    if (state.geoActive && state.geoLat != null && state.geoLng != null) {
+        params.set('lat', state.geoLat);
+        params.set('lng', state.geoLng);
+        params.set('radius', state.geoRadius);
+    }
     const value = params.toString();
     return value ? `?${value}` : '';
 }
@@ -332,12 +363,14 @@ async function loadEvents() {
         state.events = events;
         writeStore(STORE_KEYS.events, events);
         renderEvents(events);
+        renderMap(events);
         updateStats();
         await deliverPushMessages();
     } catch (error) {
         const cached = readStore(STORE_KEYS.events, []);
         state.events = cached;
         renderEvents(cached);
+        renderMap(cached);
         updateStats();
         notify('Napaka', 'Povezava ni na voljo. Prikazani so lokalno shranjeni dogodki.');
     }
@@ -396,6 +429,9 @@ function renderEvents(events) {
                 <div class="event-register">
                     <button type="button" class="register-btn" data-action="register" data-id="${event.id}">Prijavi se</button>
                 </div>
+            </div>
+            <div class="event-bottom">
+                <button type="button" class="ghost compact-button" data-action="detail" data-id="${event.id}">Podrobnosti</button>
             </div>
         `;
         elements.eventsList.append(card);
@@ -1386,6 +1422,226 @@ async function deliverPushMessages() {
     }
 }
 
+// ── Clan 3: geolokacija ───────────────────────────────────────────────────
+
+async function activateGeolocation() {
+    if (!('geolocation' in navigator)) {
+        toast('Brskalnik ne podpira geolokacije.', 'error');
+        return;
+    }
+    const label = document.getElementById('nearbyLabel');
+    elements.nearbyButton.disabled = true;
+    if (label) label.textContent = 'Pridobivam lokacijo ...';
+
+    navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+            state.geoActive = true;
+            state.geoLat = pos.coords.latitude;
+            state.geoLng = pos.coords.longitude;
+            state.geoRadius = Number(elements.geoRadiusSelect?.value || 10);
+            elements.nearbyButton.disabled = false;
+            elements.nearbyButton.classList.add('geo-active');
+            if (label) label.textContent = 'V bližini aktiven';
+            if (elements.clearGeoButton) elements.clearGeoButton.hidden = false;
+            await loadEvents();
+        },
+        (err) => {
+            elements.nearbyButton.disabled = false;
+            if (label) label.textContent = 'Dogodki v bližini';
+            const msg = err.code === 1
+                ? 'Dostop do lokacije je bil zavrnjen.'
+                : 'Geolokacija ni uspela.';
+            toast(msg, 'error');
+        },
+        { timeout: 10000, enableHighAccuracy: false }
+    );
+}
+
+function deactivateGeolocation() {
+    state.geoActive = false;
+    state.geoLat = null;
+    state.geoLng = null;
+    elements.nearbyButton.classList.remove('geo-active');
+    if (elements.clearGeoButton) elements.clearGeoButton.hidden = true;
+    const label = document.getElementById('nearbyLabel');
+    if (label) label.textContent = 'Dogodki v bližini';
+    loadEvents();
+}
+
+// ── Clan 3: podrobnosti dogodka ───────────────────────────────────────────
+
+async function openEventDetail(eventId) {
+    let ev = state.events.find((e) => e.id === eventId);
+    if (!ev) {
+        try {
+            ev = await apiRequest(`/events/${eventId}`, { auth: false });
+        } catch {
+            toast('Dogodek ni najden.', 'error');
+            return;
+        }
+    }
+    renderEventDetail(ev);
+}
+
+function renderEventDetail(ev) {
+    const dateLabel = getEventDateLabel(ev);
+    const registrations = ev.st_prijav || 0;
+    const capacity = ev.kapaciteta || 0;
+    const occupancy = capacity ? Math.min(Math.round((registrations / capacity) * 100), 100) : 0;
+
+    elements.eventDetailTitle.textContent = ev.naziv;
+    elements.eventDetailBody.innerHTML = `
+        <p class="event-detail-desc">${escapeHtml(ev.opis)}</p>
+        <div class="event-detail-chips">
+            <span class="chip">${escapeHtml(dateLabel)} ob ${escapeHtml(ev.ura)}</span>
+            <span class="chip">${escapeHtml(ev.lokacija)}</span>
+            <span class="chip">${escapeHtml(ev.mesto?.naziv || '')}</span>
+            <span class="chip">${escapeHtml(ev.kategorija?.naziv || '')}</span>
+            ${capacity ? `<span class="chip">${registrations}/${capacity} prijav</span>` : ''}
+        </div>
+        ${capacity ? `<div class="occupancy-meter" style="margin-bottom:12px;"><span style="width:${occupancy}%"></span></div>` : ''}
+        ${ev.organizator ? `<p class="muted" style="font-size:0.85rem;margin-bottom:8px;">Organizator: <strong style="color:var(--text)">${escapeHtml(ev.organizator.uporabnisko_ime || ev.organizator.email || '-')}</strong></p>` : ''}
+        <div class="event-detail-actions"></div>
+    `;
+
+    const actionsEl = elements.eventDetailBody.querySelector('.event-detail-actions');
+
+    if (state.currentUserRole !== 'organizator') {
+        const btn = document.createElement('button');
+        btn.className = 'icon-button';
+        btn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Prijavi se`;
+        btn.addEventListener('click', () => {
+            const dummyBtn = document.createElement('button');
+            dummyBtn.textContent = 'Prijavi se';
+            closeEventDetail();
+            showRegisterConfirm(ev.id, dummyBtn);
+        });
+        actionsEl.append(btn);
+    }
+
+    if (state.currentUserRole === 'organizator' && ev.organizator_id === state.currentUserId) {
+        [
+            ['QR koda', () => { closeEventDetail(); openOrganizerQr(ev.id); }],
+            ['Prijave', () => { closeEventDetail(); openEventRegistrations(ev.id); }],
+            ['Statistika', () => { closeEventDetail(); openEventStats(ev.id); }],
+        ].forEach(([label, fn]) => {
+            const btn = document.createElement('button');
+            btn.className = 'ghost icon-button';
+            btn.textContent = label;
+            btn.addEventListener('click', fn);
+            actionsEl.append(btn);
+        });
+    }
+
+    elements.eventDetailOverlay.hidden = false;
+}
+
+function closeEventDetail() {
+    elements.eventDetailOverlay.hidden = true;
+    elements.eventDetailBody.innerHTML = '';
+}
+
+// ── Clan 3: Leaflet mapa ──────────────────────────────────────────────────
+
+function initLeafletMap() {
+    if (state.leafletMap || typeof L === 'undefined') return;
+    state.leafletMap = L.map('eventsMap').setView([46.1, 14.8], 8);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(state.leafletMap);
+}
+
+function renderMap(events) {
+    if (!state.mapView || typeof L === 'undefined') return;
+    initLeafletMap();
+    if (!state.leafletMap) return;
+
+    state.mapMarkers.forEach((m) => m.remove());
+    state.mapMarkers = [];
+
+    const valid = events.filter((e) => e.koordinate_lat != null && e.koordinate_lng != null);
+    if (!valid.length) return;
+
+    const bounds = [];
+    for (const ev of valid) {
+        const marker = L.marker([ev.koordinate_lat, ev.koordinate_lng])
+            .addTo(state.leafletMap)
+            .bindPopup(`<strong>${escapeHtml(ev.naziv)}</strong><br>${escapeHtml(getEventDateLabel(ev))} ob ${escapeHtml(ev.ura)}<br>${escapeHtml(ev.lokacija)}`);
+        marker.on('click', () => openEventDetail(ev.id));
+        state.mapMarkers.push(marker);
+        bounds.push([ev.koordinate_lat, ev.koordinate_lng]);
+    }
+
+    if (state.geoActive && state.geoLat != null) {
+        state.leafletMap.setView([state.geoLat, state.geoLng], 12);
+    } else if (bounds.length) {
+        state.leafletMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+    }
+}
+
+function switchToMapView() {
+    state.mapView = true;
+    elements.eventsMap.hidden = false;
+    elements.eventsList.style.display = 'none';
+    elements.listViewBtn.classList.remove('active');
+    elements.mapViewBtn.classList.add('active');
+    requestAnimationFrame(() => {
+        initLeafletMap();
+        if (state.leafletMap) state.leafletMap.invalidateSize();
+        renderMap(state.events);
+    });
+}
+
+function switchToListView() {
+    state.mapView = false;
+    elements.eventsMap.hidden = true;
+    elements.eventsList.style.display = '';
+    elements.listViewBtn.classList.add('active');
+    elements.mapViewBtn.classList.remove('active');
+}
+
+// ── Clan 3: QR skeniranje ─────────────────────────────────────────────────
+
+async function openQrScanner() {
+    if (typeof Html5Qrcode === 'undefined') {
+        toast('QR skeniranje ni na voljo.', 'error');
+        return;
+    }
+    elements.qrScannerOverlay.hidden = false;
+    document.getElementById('qrScannerContainer').innerHTML = '';
+    state.qrScanner = new Html5Qrcode('qrScannerContainer');
+    try {
+        await state.qrScanner.start(
+            { facingMode: 'environment' },
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            (decoded) => handleQrScan(decoded),
+            () => {}
+        );
+    } catch {
+        toast('Kamera ni dostopna. Preverite dovoljenja brskalnika.', 'error');
+        await closeQrScanner();
+    }
+}
+
+async function closeQrScanner() {
+    if (state.qrScanner) {
+        await state.qrScanner.stop().catch(() => {});
+        state.qrScanner = null;
+    }
+    if (elements.qrScannerOverlay) elements.qrScannerOverlay.hidden = true;
+}
+
+async function handleQrScan(decoded) {
+    await closeQrScanner();
+    const match = decoded.match(/\/events\/([^/?&#\s]+)/);
+    if (!match) {
+        toast('QR koda ne vsebuje podatkov o dogodku.', 'error');
+        return;
+    }
+    await openEventDetail(match[1]);
+}
+
 function bindEvents() {
     elements.searchButton.addEventListener('click', loadEvents);
     elements.micButton.addEventListener('click', toggleVoiceRecognition);
@@ -1414,6 +1670,38 @@ function bindEvents() {
         renderEvents(state.events);
         if (state.currentUserRole === 'organizator') loadMyRegistrations();
     });
+
+    // Clan 3: datum filter
+    elements.dateFromInput?.addEventListener('change', loadEvents);
+    elements.dateToInput?.addEventListener('change', loadEvents);
+
+    // Clan 3: geolokacija
+    elements.nearbyButton?.addEventListener('click', activateGeolocation);
+    elements.clearGeoButton?.addEventListener('click', deactivateGeolocation);
+    elements.geoRadiusSelect?.addEventListener('change', () => {
+        if (state.geoActive) {
+            state.geoRadius = Number(elements.geoRadiusSelect.value);
+            loadEvents();
+        }
+    });
+
+    // Clan 3: seznam / mapa
+    elements.listViewBtn?.addEventListener('click', switchToListView);
+    elements.mapViewBtn?.addEventListener('click', switchToMapView);
+
+    // Clan 3: QR skener
+    elements.qrScanButton?.addEventListener('click', openQrScanner);
+    document.getElementById('closeQrScanner')?.addEventListener('click', closeQrScanner);
+    elements.qrScannerOverlay?.addEventListener('click', (e) => {
+        if (e.target === elements.qrScannerOverlay) closeQrScanner();
+    });
+
+    // Clan 3: detail modal
+    document.getElementById('closeEventDetail')?.addEventListener('click', closeEventDetail);
+    elements.eventDetailOverlay?.addEventListener('click', (e) => {
+        if (e.target === elements.eventDetailOverlay) closeEventDetail();
+    });
+
     elements.pushButton?.addEventListener('click', sendPushDemo);
     elements.addCategoryButton.addEventListener('click', addCategoryFromPrompt);
     elements.addCityButton.addEventListener('click', addCityFromPrompt);
@@ -1563,6 +1851,9 @@ function bindEvents() {
         if (button.dataset.action === 'register') {
             showRegisterConfirm(button.dataset.id, button);
         }
+        if (button.dataset.action === 'detail') {
+            openEventDetail(button.dataset.id);
+        }
     });
 
     const closeRegisterConfirm = () => {
@@ -1608,6 +1899,8 @@ function bindEvents() {
         if (key === 'escape') {
             closeEventForm();
             closeOrganizerDetail();
+            closeEventDetail();
+            closeQrScanner();
         }
     });
 }
