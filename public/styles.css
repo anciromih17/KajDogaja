@@ -334,6 +334,57 @@ h2 {
     color: #5b21b6 !important;
 }
 
+/* ── Profile dropdown akcijski gumbi ───────────────────────────── */
+.profile-menu-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 9px 10px;
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s, color 0.15s;
+    min-height: unset;
+    transform: none !important;
+}
+
+.profile-menu-btn svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.profile-menu-btn:hover {
+    background: var(--accent-soft) !important;
+    color: var(--accent-strong) !important;
+    transform: none !important;
+}
+
+.profile-menu-btn.danger {
+    color: var(--danger);
+}
+
+.profile-menu-btn.danger svg {
+    color: var(--danger);
+}
+
+.profile-menu-btn.danger:hover {
+    background: #fef2f2 !important;
+    color: var(--danger) !important;
+}
+
 .layout {
     max-width: 1240px;
     margin: 0 auto;
@@ -602,22 +653,42 @@ textarea {
     flex-wrap: wrap;
 }
 
-.filters label,
-.organizer-tools label {
-    min-width: 220px;
+.filters label {
+    min-width: 200px;
     flex: 1;
 }
 
-.organizer-tools {
-    display: none;
-    gap: 10px;
-    margin-top: 12px;
-    align-items: end;
+/* Zasedenost filter — samo za organizatorja */
+.organizer-cap {
+    display: none !important;
 }
 
-body[data-role="organizator"] .organizer-tools {
-    display: flex;
-    flex-wrap: wrap;
+body[data-role="organizator"] .organizer-cap {
+    display: flex !important;
+    flex-direction: column;
+    min-width: 200px;
+    flex: 1;
+}
+
+/* Datum filtri v svoji vrstici */
+.filters-dates {
+    max-width: calc(66.67% - 6px);
+}
+
+@media (max-width: 700px) {
+    .filters-dates {
+        max-width: 100%;
+    }
+}
+
+/* Brez organizer-tools (odstranjeno iz HTML) */
+.organizer-tools {
+    display: none;
+}
+
+/* Input znotraj organizer-cap (Iskanje po nazivu) — podeduje globalni stil input/select */
+.organizer-cap input[type="search"] {
+    font-size: 0.9rem;
 }
 
 .platform-panel {

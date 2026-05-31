@@ -7,7 +7,7 @@
     <title>KajDogaja</title>
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/pwa/styles.css?v=26">
+    <link rel="stylesheet" href="/pwa/styles.css?v=27">
     <link rel="stylesheet" href="/pwa/auth.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 </head>
@@ -50,12 +50,12 @@
                     <span id="profileRole" class="role-pill">-</span>
                     <span id="profileSince" class="profile-since"></span>
                     <hr style="border:none;border-top:1px solid #dce8ea;margin:10px 0 6px;">
-                    <button id="editProfileButton" type="button" class="ghost icon-button" style="width:100%;justify-content:flex-start;padding:6px 4px;">
+                    <button id="editProfileButton" type="button" class="profile-menu-btn">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
                         Uredi profil
                     </button>
-                    <button id="logoutButton" type="button" class="ghost icon-button" style="width:100%;justify-content:flex-start;color:#b42318;border-color:transparent;padding:6px 4px;">
-                        <svg viewBox="0 0 24 24" aria-hidden="true" style="color:#b42318"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+                    <button id="logoutButton" type="button" class="profile-menu-btn danger">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
                         Odjava
                     </button>
                 </div>
@@ -146,6 +146,20 @@
                             <option value="">Vsa mesta</option>
                         </select>
                     </label>
+                    <label class="organizer-cap">
+                        Zasedenost
+                        <select id="organizerCapacityFilter">
+                            <option value="">Vsi moji dogodki</option>
+                            <option value="open">Še imajo prostor</option>
+                            <option value="near-full">Skoraj polni</option>
+                        </select>
+                    </label>
+                    <label class="organizer-cap">
+                        Iskanje po mojih dogodkih
+                        <input id="organizerSearch" type="search" placeholder="Naziv ali opis ..." autocomplete="off">
+                    </label>
+                </div>
+                <div class="filters filters-dates">
                     <label>
                         Datum od
                         <input id="dateFromInput" type="date">
@@ -173,20 +187,6 @@
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
                         Počisti lokacijo
                     </button>
-                </div>
-                <div class="organizer-tools" aria-label="Organizatorski filtri">
-                    <label>
-                        Moji dogodki
-                        <input id="organizerSearch" type="search" placeholder="Filtriraj po nazivu, lokaciji ...">
-                    </label>
-                    <label>
-                        Zasedenost
-                        <select id="organizerCapacityFilter">
-                            <option value="">Vsi moji dogodki</option>
-                            <option value="open">Še imajo prostor</option>
-                            <option value="near-full">Skoraj polni</option>
-                        </select>
-                    </label>
                 </div>
                 <p class="hint">Bližnjice: Ctrl+K iskanje, Alt+N nov dogodek, Ctrl+S shrani obrazec.</p>
             </section>
@@ -599,6 +599,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
     <script src="/pwa/auth.js" defer></script>
-    <script src="/pwa/app.js?v=26" defer></script>
+    <script src="/pwa/app.js?v=27" defer></script>
 </body>
 </html>

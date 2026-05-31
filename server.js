@@ -350,12 +350,25 @@ app.post('/api/events/:id/registrations', authenticate, requireScope('registrati
         return sendError(res, 410, 'Dogodek je poln.');
     }
     const reg = await registrationService.create(req.user.id, event.id);
+    // Obvesti organizatorja o novi prijavi
+    await notificationService.create(
+        event.organizator_id, event.id, 'nova_prijava',
+        `${req.user.uporabnisko_ime || req.user.email} se je prijavil/a na "${event.naziv}".`
+    );
     return res.status(201).json({ id: reg.id, status: reg.status, dogodek_id: reg.dogodek_id });
 });
 
 app.delete('/api/events/:id/registrations', authenticate, requireScope('registrations'), requireRole('uporabnik'), async (req, res) => {
     const removed = await registrationService.remove(req.user.id, req.params.id);
     if (!removed) return sendError(res, 404, 'Prijava ne obstaja.');
+    // Obvesti organizatorja o odjavi
+    const event = await eventService.findRaw(req.params.id);
+    if (event) {
+        await notificationService.create(
+            event.organizator_id, event.id, 'odjava',
+            `${req.user.uporabnisko_ime || req.user.email} se je odjavil/a z "${event.naziv}".`
+        );
+    }
     return res.status(204).send();
 });
 

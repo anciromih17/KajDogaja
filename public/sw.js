@@ -1,12 +1,12 @@
-const CACHE_NAME = 'kajdogaja-static-v26';
+const CACHE_NAME = 'kajdogaja-static-v27';
 const STATIC_ASSETS = [
     '/pwa',
     '/pwa/',
     '/pwa/index.html',
-    '/pwa/styles.css?v=26',
+    '/pwa/styles.css?v=27',
     '/pwa/auth.css',
     '/pwa/auth.js',
-    '/pwa/app.js?v=26',
+    '/pwa/app.js?v=27',
     '/manifest.webmanifest',
     '/icons/icon-192.svg',
     '/icons/icon-512.svg'

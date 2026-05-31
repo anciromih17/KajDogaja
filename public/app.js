@@ -53,8 +53,8 @@ const elements = {
     categoryStat: document.getElementById('categoryStat'),
     queueStat: document.getElementById('queueStat'),
     platformStat: document.getElementById('platformStat'),
-    organizerSearch: document.getElementById('organizerSearch'),
     organizerCapacityFilter: document.getElementById('organizerCapacityFilter'),
+    organizerSearch: document.getElementById('organizerSearch'),
     pushButton: document.getElementById('pushButton'),
     pushStatus: document.getElementById('pushStatus'),
     platformSyncStatus: document.getElementById('platformSyncStatus'),
@@ -285,11 +285,10 @@ function getOrganizerEvents() {
     if (state.currentUserRole === 'organizator' && state.currentUserId) {
         events = events.filter((event) => event.organizator_id === state.currentUserId);
     }
-    const query = elements.organizerSearch?.value.trim().toLowerCase();
-    if (query) {
+    const q = elements.organizerSearch?.value?.trim().toLowerCase();
+    if (q) {
         events = events.filter((event) =>
-            [event.naziv, event.opis, event.lokacija, event.mesto?.naziv, event.kategorija?.naziv]
-                .some((value) => String(value || '').toLowerCase().includes(query))
+            event.naziv?.toLowerCase().includes(q) || event.opis?.toLowerCase().includes(q)
         );
     }
     if (elements.organizerCapacityFilter?.value === 'near-full') {
@@ -1748,29 +1747,40 @@ async function openQrScanner() {
     elements.qrScannerOverlay.hidden = false;
     document.getElementById('qrScannerContainer').innerHTML = '';
     state.qrScanner = new Html5Qrcode('qrScannerContainer');
+
+    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+    const onDecode = (decoded) => handleQrScan(decoded);
+    const onError = () => {};
+
+    // Najprej poskusi zadnjo kamero (mobilni), nato sprednjost (namizni)
     try {
-        await state.qrScanner.start(
-            { facingMode: 'environment' },
-            { fps: 10, qrbox: { width: 250, height: 250 } },
-            (decoded) => handleQrScan(decoded),
-            () => {}
-        );
+        await state.qrScanner.start({ facingMode: 'environment' }, config, onDecode, onError);
+        return;
+    } catch { /* ni zadnje kamere */ }
+
+    try {
+        await state.qrScanner.start({ facingMode: 'user' }, config, onDecode, onError);
     } catch {
         toast('Kamera ni dostopna. Preverite dovoljenja brskalnika.', 'error');
-        await closeQrScanner();
+        closeQrScanner();
     }
 }
 
-async function closeQrScanner() {
-    if (state.qrScanner) {
-        await state.qrScanner.stop().catch(() => {});
-        state.qrScanner = null;
-    }
+function closeQrScanner() {
+    // Najprej skrij overlay in počisti DOM — ne čakaj na stop() ker lahko visi
     if (elements.qrScannerOverlay) elements.qrScannerOverlay.hidden = true;
+    const container = document.getElementById('qrScannerContainer');
+    if (container) container.innerHTML = '';
+
+    if (state.qrScanner) {
+        const scanner = state.qrScanner;
+        state.qrScanner = null;
+        scanner.stop().catch(() => {}); // fire-and-forget
+    }
 }
 
 async function handleQrScan(decoded) {
-    await closeQrScanner();
+    closeQrScanner();
     const match = decoded.match(/\/events\/([^/?&#\s]+)/);
     if (!match) {
         toast('QR koda ne vsebuje podatkov o dogodku.', 'error');
@@ -1779,13 +1789,20 @@ async function handleQrScan(decoded) {
     await openEventDetail(match[1]);
 }
 
+let _searchDebounce = null;
+
 function bindEvents() {
     elements.searchButton.addEventListener('click', loadEvents);
+    elements.searchInput.addEventListener('input', () => {
+        clearTimeout(_searchDebounce);
+        _searchDebounce = setTimeout(loadEvents, 450);
+    });
     elements.micButton.addEventListener('click', toggleVoiceRecognition);
     elements.voicePanelToggle.addEventListener('click', toggleVoicePanel);
     elements.searchInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
             event.preventDefault();
+            clearTimeout(_searchDebounce);
             loadEvents();
         }
     });
@@ -1800,11 +1817,11 @@ function bindEvents() {
         if (event.target === elements.eventFormOverlay) closeEventForm();
     });
     elements.syncButton.addEventListener('click', syncQueue);
-    elements.organizerSearch?.addEventListener('input', () => {
+    elements.organizerCapacityFilter?.addEventListener('change', () => {
         renderEvents(state.events);
         if (state.currentUserRole === 'organizator') loadMyRegistrations();
     });
-    elements.organizerCapacityFilter?.addEventListener('change', () => {
+    elements.organizerSearch?.addEventListener('input', () => {
         renderEvents(state.events);
         if (state.currentUserRole === 'organizator') loadMyRegistrations();
     });

@@ -6,8 +6,9 @@ services:
       POSTGRES_USER: kajdogaja
       POSTGRES_PASSWORD: kajdogaja
       POSTGRES_DB: kajdogaja
+      POSTGRES_HOST_AUTH_METHOD: trust
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - kajdogaja_pg_data:/var/lib/postgresql/data
     restart: unless-stopped
